@@ -1,0 +1,355 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:http/http.dart' as http;
+
+import '../../core/constants/app_constants.dart';
+import '../../core/errors/app_exception.dart';
+import '../../core/utils/safe_logger.dart';
+import '../models/personal_record.dart';
+
+/// Outcome of a single write operation against the Sheets endpoint.
+///
+/// [confirmed] is true only when the server response explicitly acknowledges
+/// success. A bare HTTP 200 with an ambiguous body is treated as *unconfirmed*
+/// so the app never claims a sync it cannot verify.
+class SyncOperationResult {
+  const SyncOperationResult({
+    required this.confirmed,
+    required this.message,
+    this.unsupported = false,
+  });
+
+  const SyncOperationResult.unconfirmed(this.message)
+    : confirmed = false,
+      unsupported = false;
+
+  const SyncOperationResult.unsupported(this.message)
+    : confirmed = false,
+      unsupported = true;
+
+  final bool confirmed;
+  final String message;
+
+  /// True when the server responded but does not implement the action.
+  final bool unsupported;
+
+  static const SyncOperationResult ok = SyncOperationResult(
+    confirmed: true,
+    message: 'Confirmed by server',
+  );
+}
+
+/// Thin, testable client for the deployed Google Apps Script Web App.
+///
+/// Contract implemented (matching the existing deployment):
+///   GET  : list records
+///   POST : { "action": "add", "record": { ... } }
+///
+/// Extended actions (`update`, `delete`) are sent using the same envelope and
+/// are reported as [SyncOperationResult.unsupported] when the server does not
+/// implement them. See `tool/apps_script/Code.gs` for the reference server.
+class GoogleSheetsService {
+  GoogleSheetsService({
+    required this.endpoint,
+    http.Client? client,
+    Duration? timeout,
+    int? readRetries,
+    int? writeRetries,
+  }) : _client = client ?? http.Client(),
+       _timeout = timeout ?? AppConstants.requestTimeout,
+       _readRetries = readRetries ?? AppConstants.readRetryAttempts,
+       _writeRetries = writeRetries ?? AppConstants.writeRetryAttempts;
+
+  final Uri endpoint;
+  final http.Client _client;
+  final Duration _timeout;
+  final int _readRetries;
+  final int _writeRetries;
+
+  static const Map<String, String> _jsonHeaders = {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Accept': 'application/json',
+  };
+
+  void dispose() => _client.close();
+
+  /// Fetches all records from the server.
+  ///
+  /// Reads are idempotent and may be safely retried.
+  Future<List<PersonalRecord>> fetchRecords() async {
+    final decoded = await _sendJson(method: 'GET', attempts: _readRetries);
+    final list = _extractRecordList(decoded);
+    final records = <PersonalRecord>[];
+    for (final item in list) {
+      if (item is Map) {
+        final record = PersonalRecord.fromRemoteJson(
+          item.map((k, v) => MapEntry(k.toString(), v)),
+        );
+        if (record.id.isNotEmpty) records.add(record);
+      }
+    }
+    return records;
+  }
+
+  /// Lightweight reachability probe used by the Settings screen.
+  ///
+  /// Returns true when the endpoint responds with a parseable JSON body.
+  Future<bool> checkConnection() async {
+    try {
+      await _sendJson(method: 'GET', attempts: 1);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Adds (or upserts) a record. Safe to retry: the server matches on [id].
+  Future<SyncOperationResult> addRecord(PersonalRecord record) {
+    return _mutate('add', record);
+  }
+
+  /// Updates an existing record by id.
+  Future<SyncOperationResult> updateRecord(PersonalRecord record) {
+    return _mutate('update', record);
+  }
+
+  /// Deletes a record by id.
+  Future<SyncOperationResult> deleteRecord(String id) async {
+    final decoded = await _sendJson(
+      method: 'POST',
+      attempts: _writeRetries,
+      body: jsonEncode({
+        'action': 'delete',
+        'record': {'id': id},
+      }),
+    );
+    return _interpretWrite(decoded, expectedId: id);
+  }
+
+  Future<SyncOperationResult> _mutate(
+    String action,
+    PersonalRecord record,
+  ) async {
+    final decoded = await _sendJson(
+      method: 'POST',
+      attempts: _writeRetries,
+      body: jsonEncode({'action': action, 'record': record.toRemoteJson()}),
+    );
+    return _interpretWrite(decoded, expectedId: record.id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Transport
+  // ---------------------------------------------------------------------------
+
+  Future<dynamic> _sendJson({
+    required String method,
+    int attempts = 1,
+    String? body,
+  }) async {
+    Object? lastError;
+    StackTrace? lastStack;
+    for (var attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        return await _sendOnce(method: method, body: body);
+      } on AppException catch (e) {
+        lastError = e;
+        lastStack = e.stackTrace;
+        final retryable =
+            e.type == AppErrorType.timeout ||
+            e.type == AppErrorType.network ||
+            e.type == AppErrorType.server;
+        if (!retryable || attempt == attempts) rethrow;
+        SafeLogger.info('Sheets request retry $attempt/$attempts');
+        await Future<void>.delayed(AppConstants.retryBackoff * attempt);
+      }
+    }
+    throw AppException.from(lastError!, lastStack);
+  }
+
+  Future<dynamic> _sendOnce({required String method, String? body}) async {
+    http.Response response;
+    try {
+      if (method == 'GET') {
+        response = await _client
+            .get(endpoint, headers: _jsonHeaders)
+            .timeout(_timeout);
+      } else {
+        // Apps Script web apps respond to POST with a redirect to a
+        // script.googleusercontent.com URL. The http package follows the
+        // redirect automatically.
+        response = await _client
+            .post(endpoint, headers: _jsonHeaders, body: body)
+            .timeout(_timeout);
+      }
+    } on TimeoutException catch (e, s) {
+      throw AppException(
+        AppErrorType.timeout,
+        'The server took too long to respond.',
+        cause: e,
+        stackTrace: s,
+      );
+    } catch (e, s) {
+      throw AppException.from(e, s);
+    }
+
+    if (response.statusCode >= 500) {
+      throw AppException(
+        AppErrorType.server,
+        'The server is temporarily unavailable (${response.statusCode}).',
+      );
+    }
+    if (response.statusCode >= 400) {
+      throw AppException(
+        AppErrorType.server,
+        'The server rejected the request (${response.statusCode}).',
+      );
+    }
+
+    final raw = response.body.trim();
+    if (raw.isEmpty) {
+      throw const AppException(
+        AppErrorType.malformedResponse,
+        'The server returned an empty response.',
+      );
+    }
+    if (raw.startsWith('<')) {
+      // Apps Script returns an HTML page when the deployment is not accessible
+      // anonymously or when the script threw before writing JSON.
+      throw const AppException(
+        AppErrorType.server,
+        'The server did not return data. The web app may not be shared for '
+        'public access, or access is restricted.',
+      );
+    }
+
+    try {
+      return jsonDecode(raw);
+    } on FormatException catch (e, s) {
+      throw AppException(
+        AppErrorType.malformedResponse,
+        'Received an unexpected response format from the server.',
+        cause: e,
+        stackTrace: s,
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Parsing helpers
+  // ---------------------------------------------------------------------------
+
+  List<dynamic> _extractRecordList(dynamic decoded) {
+    if (decoded is List) return decoded;
+    if (decoded is Map) {
+      final map = decoded.map((k, v) => MapEntry(k.toString(), v));
+      // A server-side error envelope.
+      final error = map['error'];
+      if (error != null &&
+          error.toString().trim().isNotEmpty &&
+          error.toString().toLowerCase() != 'false' &&
+          error.toString().toLowerCase() != 'null') {
+        throw AppException(
+          AppErrorType.server,
+          'Server error: ${error.toString()}',
+        );
+      }
+      for (final key in const ['records', 'data', 'rows', 'items', 'values']) {
+        final value = map[key];
+        if (value is List) return value;
+      }
+      if (map.containsKey('id')) return [map];
+    }
+    throw const AppException(
+      AppErrorType.malformedResponse,
+      'The server response did not contain a records list.',
+    );
+  }
+
+  SyncOperationResult _interpretWrite(
+    dynamic decoded, {
+    required String expectedId,
+  }) {
+    if (decoded is List) {
+      if (decoded.isEmpty) {
+        return const SyncOperationResult.unconfirmed(
+          'Server returned no confirmation for this change.',
+        );
+      }
+      return SyncOperationResult.ok;
+    }
+    if (decoded is Map) {
+      final map = decoded.map((k, v) => MapEntry(k.toString(), v));
+
+      final error = map['error'];
+      if (error != null) {
+        final normalized = error.toString().trim().toLowerCase();
+        if (normalized.isNotEmpty &&
+            normalized != 'false' &&
+            normalized != 'null' &&
+            normalized != 'none') {
+          final unsupported =
+              normalized.contains('unknown action') ||
+              normalized.contains('unsupported') ||
+              normalized.contains('not implemented');
+          if (unsupported) {
+            return SyncOperationResult.unsupported(
+              'The server does not support this action yet.',
+            );
+          }
+          return SyncOperationResult(
+            confirmed: false,
+            message: 'Server reported an error: ${error.toString()}',
+          );
+        }
+      }
+
+      final success = map['success'];
+      if (success is bool) {
+        return success
+            ? SyncOperationResult.ok
+            : const SyncOperationResult.unconfirmed(
+                'Server did not confirm the change.',
+              );
+      }
+
+      for (final key in const ['status', 'result', 'state', 'message']) {
+        final value = map[key]?.toString().trim().toLowerCase();
+        if (value == null || value.isEmpty) continue;
+        if (value.contains('success') ||
+            value == 'ok' ||
+            value == 'added' ||
+            value == 'updated' ||
+            value == 'deleted' ||
+            value == 'upserted') {
+          return SyncOperationResult.ok;
+        }
+        if (value.contains('unknown action') ||
+            value.contains('unsupported') ||
+            value.contains('not implemented')) {
+          return SyncOperationResult.unsupported(
+            'The server does not support this action yet.',
+          );
+        }
+        if (value.contains('error') || value.contains('fail')) {
+          return SyncOperationResult(
+            confirmed: false,
+            message: 'Server did not confirm the change.',
+          );
+        }
+      }
+
+      // Echo of the affected record counts as confirmation.
+      final echoedId =
+          map['id'] ??
+          (map['record'] is Map ? (map['record'] as Map)['id'] : null);
+      if (echoedId != null && echoedId.toString() == expectedId) {
+        return SyncOperationResult.ok;
+      }
+    }
+    return const SyncOperationResult.unconfirmed(
+      'Server did not confirm the change.',
+    );
+  }
+}
