@@ -78,14 +78,14 @@ class RecordsController extends AsyncNotifier<List<PersonalRecord>> {
     return saved;
   }
 
-  Future<void> softDelete(String id) async {
-    await ref.read(recordRepositoryProvider).markDeleted(id);
+  Future<void> softDelete(String aadhaarNumber) async {
+    await ref.read(recordRepositoryProvider).markDeleted(aadhaarNumber);
     ref.invalidateSelf();
     await future;
   }
 
-  Future<void> resolveKeepLocal(String id) async {
-    await ref.read(recordRepositoryProvider).resolveKeepLocal(id);
+  Future<void> resolveKeepLocal(String aadhaarNumber) async {
+    await ref.read(recordRepositoryProvider).resolveKeepLocal(aadhaarNumber);
     ref.invalidateSelf();
     await future;
   }
@@ -98,12 +98,12 @@ class RecordsController extends AsyncNotifier<List<PersonalRecord>> {
 }
 
 /// A single record loaded straight from SQLite (unaffected by search filters).
-final recordByIdProvider = FutureProvider.family<PersonalRecord?, String>((
+final recordByAadhaarProvider = FutureProvider.family<PersonalRecord?, String>((
   ref,
-  id,
+  aadhaar,
 ) async {
   ref.watch(recordsProvider);
-  return ref.watch(recordRepositoryProvider).getById(id);
+  return ref.watch(recordRepositoryProvider).getByAadhaar(aadhaar);
 });
 
 /// Dashboard aggregate stats; recomputed whenever the record list changes.

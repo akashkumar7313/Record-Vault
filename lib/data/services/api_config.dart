@@ -14,7 +14,7 @@ class ApiConfig {
 
   static const String sheetsWebAppUrl = String.fromEnvironment(
     'RECORD_VAULT_SHEETS_URL',
-    defaultValue: 'https://script.google.com/macros/s/AKfycbzWyYnVkin2CpohbOf8YkOu4Yyl6Sw15iykoiSDmi3VvBQgfvJttszBs5Iw_hD5HAnu/exec',
+    defaultValue: 'https://script.google.com/macros/s/AKfycbxxI3djYjtuiklxeY4k0-V2xl3O17GabLh998zUdMa70uBLrRfsGiXgmEBNa9mXa9_9/exec',
   );
 
   /// Whether the default endpoint has been replaced with a custom one.

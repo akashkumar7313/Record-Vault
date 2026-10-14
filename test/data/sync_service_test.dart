@@ -9,20 +9,22 @@ import 'package:record_vault/data/models/personal_record.dart';
 import 'package:record_vault/data/models/sync_status.dart';
 import 'package:record_vault/data/repositories/record_repository.dart';
 import 'package:record_vault/data/services/google_sheets_service.dart';
+import 'package:record_vault/data/services/photo_storage_service.dart';
 import 'package:record_vault/data/services/sync_service.dart';
 
 import '../helpers/test_database.dart';
 
 final _endpoint = Uri.parse('https://example.com/exec');
+const _aadhaar = '123456789012';
 
 PersonalRecord sample({
-  String id = 'id-1',
+  String aadhaarNumber = _aadhaar,
   String name = 'Asha Verma',
   DateTime? updatedAt,
 }) {
   final stamp = updatedAt ?? DateTime.utc(2024, 1, 1);
   return PersonalRecord(
-    id: id,
+    aadhaarNumber: aadhaarNumber,
     fullName: name,
     mobileNumber: '9876543210',
     email: 'asha@example.com',
@@ -77,7 +79,7 @@ void main() {
 
     expect(report.serverReachable, isTrue);
     expect(report.pushed, 1);
-    final record = (await repository.getById('id-1'))!;
+    final record = (await repository.getByAadhaar(_aadhaar))!;
     expect(record.syncStatus, SyncStatus.synced);
     expect(report.conflicts, 0);
   });
@@ -92,7 +94,7 @@ void main() {
 
     expect(report.serverReachable, isFalse);
     expect(report.failed, 1);
-    final record = (await repository.getById('id-1'))!;
+    final record = (await repository.getByAadhaar(_aadhaar))!;
     expect(record.syncStatus, SyncStatus.failed);
     expect(await repository.count(), 1);
   });
@@ -108,19 +110,74 @@ void main() {
     expect(report.pushed, 0);
     expect(report.failed, 1);
     expect(await repository.count(), 1);
-    final record = (await repository.getById('id-1'))!;
+    final record = (await repository.getByAadhaar(_aadhaar))!;
     expect(record.syncStatus, SyncStatus.failed);
   });
+
+  test('the pushed payload is keyed by Aadhaar, not a surrogate id', () async {
+    await repository.create(sample());
+    final bodies = <String>[];
+    final service = serviceUsing(
+      MockClient((request) async {
+        if (request.method == 'GET') {
+          return http.Response('{"records":[]}', 200);
+        }
+        bodies.add(request.body);
+        return http.Response('{"success":true}', 200);
+      }),
+    );
+
+    await service.syncAll();
+
+    expect(bodies.single.contains('"aadhaarNumber":"$_aadhaar"'), isTrue);
+    expect(bodies.single.contains('"id"'), isFalse);
+  });
+
+  test(
+    'photo is uploaded as base64 and the returned file id is stored',
+    () async {
+      final dir = await Directory.systemTemp.createTemp('rv_photo');
+      addTearDown(() => dir.delete(recursive: true));
+      final photo = File('${dir.path}/p.jpg')..writeAsBytesSync([1, 2, 3, 4]);
+
+      await repository.create(sample().copyWith(photoPath: photo.path));
+
+      final service = SyncService(
+        repository,
+        GoogleSheetsService(
+          endpoint: _endpoint,
+          client: MockClient((request) async {
+            if (request.method == 'GET') {
+              return http.Response('{"records":[]}', 200);
+            }
+            return http.Response(
+              '{"success":true,"photoFileId":"drive-123"}',
+              200,
+            );
+          }),
+          readRetries: 1,
+          writeRetries: 1,
+        ),
+        photos: PhotoStorageService(documentsDir: () async => dir),
+      );
+
+      final report = await service.syncAll();
+
+      expect(report.pushed, 1);
+      final record = (await repository.getByAadhaar(_aadhaar))!;
+      expect(record.photoFileId, 'drive-123');
+    },
+  );
 
   test(
     'updates use the update action and never re-add (no duplicates)',
     () async {
       final created = await repository.create(sample());
-      await repository.markSynced(created.id);
+      await repository.markSynced(created.aadhaarNumber);
 
       // Local edit makes it dirty again.
       await repository.update(
-        (await repository.getById(created.id))!
+        (await repository.getByAadhaar(created.aadhaarNumber))!
             .copyWith(fullName: 'Asha Verma'),
       );
 
@@ -164,7 +221,7 @@ void main() {
     final service = serviceUsing(
       router(
         onGet: (_) => http.Response(
-          '{"records":[{"id":"id-1","fullName":"Asha V.",'
+          '{"records":[{"aadhaarNumber":"$_aadhaar","fullName":"Asha V.",'
           '"updatedAt":"2024-06-01T00:00:00.000Z"}]}',
           200,
         ),
@@ -174,7 +231,7 @@ void main() {
     final report = await service.syncAll();
 
     expect(report.pulled, 1);
-    final record = (await repository.getById('id-1'))!;
+    final record = (await repository.getByAadhaar(_aadhaar))!;
     expect(record.fullName, 'Asha V.');
     expect(record.updatedAt, DateTime.utc(2024, 6, 1));
   });
@@ -189,7 +246,7 @@ void main() {
       router(
         onPost: (_) => http.Response('{}', 200), // unconfirmed -> stays dirty
         onGet: (_) => http.Response(
-          '{"records":[{"id":"id-1","fullName":"Server Version",'
+          '{"records":[{"aadhaarNumber":"$_aadhaar","fullName":"Server Version",'
           '"updatedAt":"2024-07-01T00:00:00.000Z"}]}',
           200,
         ),
@@ -199,7 +256,7 @@ void main() {
     final report = await service.syncAll();
 
     expect(report.conflicts, 1);
-    final record = (await repository.getById('id-1'))!;
+    final record = (await repository.getByAadhaar(_aadhaar))!;
     expect(record.syncStatus, SyncStatus.conflict);
     expect(record.fullName, 'Local Version');
 
@@ -209,8 +266,8 @@ void main() {
 
   test('failed delete keeps the tombstone until confirmed', () async {
     final created = await repository.create(sample());
-    await repository.markSynced(created.id);
-    await repository.markDeleted(created.id);
+    await repository.markSynced(created.aadhaarNumber);
+    await repository.markDeleted(created.aadhaarNumber);
 
     final service = serviceUsing(
       router(
@@ -221,20 +278,20 @@ void main() {
     final report = await service.syncAll();
 
     expect(report.failed, 1);
-    final stillThere = await repository.getById('id-1');
+    final stillThere = await repository.getByAadhaar(_aadhaar);
     expect(stillThere, isNotNull);
     expect(stillThere!.isDeleted, isTrue);
   });
 
   test('confirmed delete removes the tombstone locally', () async {
     final created = await repository.create(sample());
-    await repository.markSynced(created.id);
-    await repository.markDeleted(created.id);
+    await repository.markSynced(created.aadhaarNumber);
+    await repository.markDeleted(created.aadhaarNumber);
 
     final service = serviceUsing(router(onPost: null, onGet: null));
 
     await service.syncAll();
 
-    expect(await repository.getById('id-1'), isNull);
+    expect(await repository.getByAadhaar(_aadhaar), isNull);
   });
 }

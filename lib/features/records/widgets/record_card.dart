@@ -41,6 +41,7 @@ class RecordCard extends StatelessWidget {
               RecordAvatar(
                 name: record.fullName,
                 photoPath: record.photoPath,
+                photoUrl: record.photoUrl,
                 radius: 26,
               ),
               const SizedBox(width: AppSpacing.md),

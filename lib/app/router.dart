@@ -37,10 +37,10 @@ class AppRouter {
           builder: (_) => RecordFormScreen(existing: record),
         );
       case AppRoutes.recordDetails:
-        final id = settings.arguments as String;
+        final aadhaarNumber = settings.arguments as String;
         return MaterialPageRoute<void>(
           settings: settings,
-          builder: (_) => RecordDetailsScreen(recordId: id),
+          builder: (_) => RecordDetailsScreen(aadhaarNumber: aadhaarNumber),
         );
       case AppRoutes.home:
       default:

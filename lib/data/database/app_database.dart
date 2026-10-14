@@ -35,7 +35,7 @@ class AppDatabase {
     return _factory.openDatabase(
       path,
       options: OpenDatabaseOptions(
-        version: 1,
+        version: 2,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
         },
@@ -53,7 +53,7 @@ class AppDatabase {
   Future<void> _onCreate(Database db, int version) async {
     await db.execute('''
       CREATE TABLE ${DbSchema.recordsTable} (
-        id TEXT PRIMARY KEY,
+        aadhaar_number TEXT PRIMARY KEY,
         full_name TEXT NOT NULL,
         father_name TEXT NOT NULL DEFAULT '',
         mother_name TEXT NOT NULL DEFAULT '',
@@ -63,6 +63,7 @@ class AppDatabase {
         date_of_birth TEXT NOT NULL,
         gender TEXT NOT NULL,
         photo_path TEXT,
+        photo_file_id TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         sync_status TEXT NOT NULL DEFAULT 'pending',
@@ -94,7 +95,46 @@ class AppDatabase {
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    // No migrations yet; future versions add steps here.
+    if (oldVersion < 2) {
+      // v1 keyed records by a random `id` with no Aadhaar column, which cannot
+      // be mapped onto the new Aadhaar primary key. The records table is rebuilt
+      // (local cache only — the source of truth is the device + Sheets).
+      await db.execute('DROP TABLE IF EXISTS ${DbSchema.recordsTable}');
+      await db.execute('''
+        CREATE TABLE ${DbSchema.recordsTable} (
+          aadhaar_number TEXT PRIMARY KEY,
+          full_name TEXT NOT NULL,
+          father_name TEXT NOT NULL DEFAULT '',
+          mother_name TEXT NOT NULL DEFAULT '',
+          mobile_number TEXT NOT NULL DEFAULT '',
+          email TEXT NOT NULL DEFAULT '',
+          address TEXT NOT NULL DEFAULT '',
+          date_of_birth TEXT NOT NULL,
+          gender TEXT NOT NULL,
+          photo_path TEXT,
+          photo_file_id TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          sync_status TEXT NOT NULL DEFAULT 'pending',
+          last_synced_at TEXT,
+          remote_updated_at TEXT,
+          is_deleted INTEGER NOT NULL DEFAULT 0,
+          deleted_at TEXT
+        )
+      ''');
+      await db.execute(
+        'CREATE INDEX idx_records_full_name ON ${DbSchema.recordsTable}(full_name)',
+      );
+      await db.execute(
+        'CREATE INDEX idx_records_mobile ON ${DbSchema.recordsTable}(mobile_number)',
+      );
+      await db.execute(
+        'CREATE INDEX idx_records_updated ON ${DbSchema.recordsTable}(updated_at)',
+      );
+      await db.execute(
+        'CREATE INDEX idx_records_sync ON ${DbSchema.recordsTable}(sync_status)',
+      );
+    }
   }
 
   Future<void> close() async {
@@ -115,12 +155,12 @@ class AppDatabase {
     );
   }
 
-  Future<PersonalRecord?> getRecord(String id) async {
+  Future<PersonalRecord?> getRecord(String aadhaarNumber) async {
     final db = await database;
     final rows = await db.query(
       DbSchema.recordsTable,
-      where: 'id = ?',
-      whereArgs: [id],
+      where: 'aadhaar_number = ?',
+      whereArgs: [aadhaarNumber],
       limit: 1,
     );
     if (rows.isEmpty) return null;
@@ -156,7 +196,7 @@ class AppDatabase {
     final like = '%${trimmed.toLowerCase()}%';
     final conditions = <String>[
       "(LOWER(full_name) LIKE ? OR LOWER(mobile_number) LIKE ? "
-          "OR LOWER(id) LIKE ?)",
+          "OR LOWER(aadhaar_number) LIKE ?)",
     ];
     if (!includeDeleted) conditions.add('is_deleted = 0');
 
@@ -212,9 +252,13 @@ class AppDatabase {
     return rows.map(PersonalRecord.fromMap).toList(growable: false);
   }
 
-  Future<void> deleteRecordPermanently(String id) async {
+  Future<void> deleteRecordPermanently(String aadhaarNumber) async {
     final db = await database;
-    await db.delete(DbSchema.recordsTable, where: 'id = ?', whereArgs: [id]);
+    await db.delete(
+      DbSchema.recordsTable,
+      where: 'aadhaar_number = ?',
+      whereArgs: [aadhaarNumber],
+    );
   }
 
   Future<void> deleteAllRecords() async {

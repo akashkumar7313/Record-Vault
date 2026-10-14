@@ -20,7 +20,7 @@ GoogleSheetsService serviceWith(MockClient client) => GoogleSheetsService(
 );
 
 PersonalRecord sample() => PersonalRecord(
-  id: 'id-1',
+  aadhaarNumber: '123456789012',
   fullName: 'Asha Verma',
   mobileNumber: '9876543210',
   email: 'asha@example.com',
@@ -37,7 +37,8 @@ void main() {
       final service = serviceWith(
         MockClient(
           (_) async => http.Response(
-            '{"records":[{"id":"id-1","fullName":"Asha Verma"}]}',
+            '{"records":[{"aadhaarNumber":"123456789012",'
+            '"fullName":"Asha Verma"}]}',
             200,
           ),
         ),
@@ -45,12 +46,18 @@ void main() {
       final records = await service.fetchRecords();
       expect(records, hasLength(1));
       expect(records.first.fullName, 'Asha Verma');
+      expect(records.first.aadhaarNumber, '123456789012');
       expect(records.first.syncStatus, SyncStatus.synced);
     });
 
     test('parses a bare JSON array', () async {
       final service = serviceWith(
-        MockClient((_) async => http.Response('[{"id":"a"},{"id":"b"}]', 200)),
+        MockClient(
+          (_) async => http.Response(
+            '[{"aadhaarNumber":"111111111111"},{"aadhaarNumber":"222222222222"}]',
+            200,
+          ),
+        ),
       );
       expect(await service.fetchRecords(), hasLength(2));
     });
@@ -154,11 +161,47 @@ void main() {
       expect(result.confirmed, isTrue);
     });
 
-    test('is confirmed when the record id is echoed', () async {
+    test('is confirmed when the Aadhaar is echoed', () async {
       final service = serviceWith(
-        MockClient((_) async => http.Response('{"id":"id-1"}', 200)),
+        MockClient(
+          (_) async => http.Response('{"aadhaarNumber":"123456789012"}', 200),
+        ),
       );
       expect((await service.addRecord(sample())).confirmed, isTrue);
+    });
+
+    test('returns the Drive photo file id from the response', () async {
+      final service = serviceWith(
+        MockClient(
+          (_) async =>
+              http.Response('{"success":true,"photoFileId":"drive-9"}', 200),
+        ),
+      );
+      final result = await service.addRecord(sample(), photoBase64: 'AAAA');
+      expect(result.confirmed, isTrue);
+      expect(result.photoFileId, 'drive-9');
+    });
+
+    test('follows the Apps Script 302 redirect to the echo URL', () async {
+      final client = MockClient((request) async {
+        if (request.method == 'POST') {
+          return http.Response(
+            '',
+            302,
+            headers: {
+              'location':
+                  'https://script.googleusercontent.com/macros/echo?x=1',
+            },
+          );
+        }
+        return http.Response(
+          '{"success":true,"aadhaarNumber":"123456789012"}',
+          200,
+        );
+      });
+
+      final result = await serviceWith(client).addRecord(sample());
+      expect(result.confirmed, isTrue);
     });
 
     test('is NOT confirmed on an ambiguous body', () async {

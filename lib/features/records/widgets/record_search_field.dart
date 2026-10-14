@@ -53,7 +53,7 @@ class _RecordSearchFieldState extends ConsumerState<RecordSearchField> {
           ref.read(searchQueryProvider.notifier).update(value),
       onSubmitted: (value) => widget.onSubmitted?.call(value),
       decoration: InputDecoration(
-        hintText: 'Search by name, mobile or record ID',
+        hintText: 'Search by name, mobile or Aadhaar',
         prefixIcon: const Icon(Icons.search),
         suffixIcon: ValueListenableBuilder<TextEditingValue>(
           valueListenable: _controller,

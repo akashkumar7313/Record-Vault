@@ -50,6 +50,7 @@ final syncServiceProvider = Provider<SyncService>((ref) {
   return SyncService(
     ref.watch(recordRepositoryProvider),
     ref.watch(googleSheetsServiceProvider),
+    photos: ref.watch(photoStorageServiceProvider),
   );
 });
 

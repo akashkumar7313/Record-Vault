@@ -7,7 +7,9 @@ class Validators {
     r'(?:\.[a-zA-Z0-9-]+)+$',
   );
 
-  static final RegExp _mobileRegExp = RegExp(r'^\+?[0-9]{7,15}$');
+  static final RegExp _mobileRegExp = RegExp(r'^[0-9]{10}$');
+
+  static final RegExp _aadhaarRegExp = RegExp(r'^[0-9]{12}$');
 
   /// Returns an error string, or `null` when [value] is valid.
   static String? required(String? value, {String field = 'This field'}) {
@@ -49,9 +51,22 @@ class Validators {
     if (trimmed.isEmpty) {
       return 'Mobile number is required';
     }
-    final normalised = trimmed.replaceAll(RegExp(r'[\s\-()]'), '');
+    final normalised = normaliseMobile(trimmed);
     if (!_mobileRegExp.hasMatch(normalised)) {
-      return 'Enter a valid mobile number (7-15 digits)';
+      return 'Enter a valid 10-digit mobile number';
+    }
+    return null;
+  }
+
+  /// Validates the 12-digit Aadhaar number used as the unique record identity.
+  static String? aadhaar(String? value) {
+    final trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      return 'Aadhaar number is required';
+    }
+    final normalised = normaliseAadhaar(trimmed);
+    if (!_aadhaarRegExp.hasMatch(normalised)) {
+      return 'Enter a valid 12-digit Aadhaar number';
     }
     return null;
   }
@@ -87,7 +102,22 @@ class Validators {
     return null;
   }
 
-  /// Normalises a mobile number for storage/search by removing separators.
-  static String normaliseMobile(String value) =>
-      value.replaceAll(RegExp(r'[\s\-()]'), '');
+  /// Normalises a mobile number for storage/search.
+  ///
+  /// Keeps digits only and drops a leading Indian country code (`91`) or trunk
+  /// `0` so the result is the 10-digit national number.
+  static String normaliseMobile(String value) {
+    var digits = value.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length > 10 && digits.startsWith('91')) {
+      digits = digits.substring(2);
+    }
+    if (digits.length > 10 && digits.startsWith('0')) {
+      digits = digits.substring(digits.length - 10);
+    }
+    return digits;
+  }
+
+  /// Normalises an Aadhaar number by removing spaces and dashes.
+  static String normaliseAadhaar(String value) =>
+      value.replaceAll(RegExp(r'[\s-]'), '');
 }

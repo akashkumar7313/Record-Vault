@@ -40,8 +40,22 @@ void main() {
       expect(Validators.mobile('987-654-3210'), isNull);
     });
 
-    test('normaliseMobile strips separators', () {
-      expect(Validators.normaliseMobile('+91 98765-43210'), '+919876543210');
+    test('normaliseMobile strips separators and country code', () {
+      expect(Validators.normaliseMobile('+91 98765-43210'), '9876543210');
+      expect(Validators.normaliseMobile('09876543210'), '9876543210');
+    });
+  });
+
+  group('Validators.aadhaar', () {
+    test('rejects empty and non-12-digit values', () {
+      for (final value in ['', '123', '12345678901', '1234567890123', 'abcd']) {
+        expect(Validators.aadhaar(value), isNotNull, reason: value);
+      }
+    });
+
+    test('accepts a 12-digit number with separators', () {
+      expect(Validators.aadhaar('1234 5678 9012'), isNull);
+      expect(Validators.normaliseAadhaar('1234 5678-9012'), '123456789012');
     });
   });
 

@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:uuid/uuid.dart';
 
 import '../../../app/theme/app_theme.dart';
 import '../../../core/errors/app_exception.dart';
@@ -12,7 +11,6 @@ import '../../../core/widgets/confirm_dialog.dart';
 import '../../../core/widgets/record_avatar.dart';
 import '../../../data/models/gender.dart';
 import '../../../data/models/personal_record.dart';
-import '../../../data/models/sync_status.dart';
 import '../../../data/providers/data_providers.dart';
 import '../../settings/providers/settings_providers.dart';
 import '../providers/records_providers.dart';
@@ -30,11 +28,9 @@ class RecordFormScreen extends ConsumerStatefulWidget {
 }
 
 class _RecordFormScreenState extends ConsumerState<RecordFormScreen> {
-  static const _uuid = Uuid();
-
   final _formKey = GlobalKey<FormState>();
 
-  late final String _recordId;
+  late final TextEditingController _aadhaar;
   late final TextEditingController _fullName;
   late final TextEditingController _fatherName;
   late final TextEditingController _motherName;
@@ -54,7 +50,7 @@ class _RecordFormScreenState extends ConsumerState<RecordFormScreen> {
   void initState() {
     super.initState();
     final record = existing;
-    _recordId = record?.id ?? _uuid.v4();
+    _aadhaar = TextEditingController(text: record?.aadhaarNumber ?? '');
     _fullName = TextEditingController(text: record?.fullName ?? '');
     _fatherName = TextEditingController(text: record?.fatherName ?? '');
     _motherName = TextEditingController(text: record?.motherName ?? '');
@@ -71,6 +67,7 @@ class _RecordFormScreenState extends ConsumerState<RecordFormScreen> {
 
   @override
   void dispose() {
+    _aadhaar.dispose();
     _fullName.dispose();
     _fatherName.dispose();
     _motherName.dispose();
@@ -81,13 +78,21 @@ class _RecordFormScreenState extends ConsumerState<RecordFormScreen> {
     super.dispose();
   }
 
+  /// Key used for the stored photo filename. Prefers the Aadhaar number.
+  String get _photoKey {
+    final normalised = Validators.normaliseAadhaar(_aadhaar.text.trim());
+    return normalised.isNotEmpty
+        ? normalised
+        : 'tmp-${DateTime.now().microsecondsSinceEpoch}';
+  }
+
   Future<void> _pickPhoto() async {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final photoService = ref.read(photoStorageServiceProvider);
       final picked = await photoService.pickImage();
       if (picked == null) return;
-      final path = await photoService.persist(picked, _recordId);
+      final path = await photoService.persist(picked, _photoKey);
 
       // Best-effort cleanup of the superseded photo, if any.
       final previous = _photoPath;
@@ -145,24 +150,62 @@ class _RecordFormScreenState extends ConsumerState<RecordFormScreen> {
     setState(() => _submitting = true);
 
     final now = DateTime.now().toUtc();
-    final record = PersonalRecord(
-      id: _recordId,
-      fullName: _fullName.text.trim(),
-      fatherName: _fatherName.text.trim(),
-      motherName: _motherName.text.trim(),
-      mobileNumber: Validators.normaliseMobile(_mobile.text.trim()),
-      email: _email.text.trim().toLowerCase(),
-      address: _address.text.trim(),
-      dateOfBirth: _dob!,
-      gender: _gender,
-      photoPath: _photoPath,
-      createdAt: existing?.createdAt ?? now,
-      updatedAt: now,
-      syncStatus: existing?.syncStatus ?? SyncStatus.pending,
-    );
+    final aadhaarNumber = Validators.normaliseAadhaar(_aadhaar.text.trim());
+    final current = existing;
+    // When editing, derive from the stored record so sync metadata
+    // (lastSyncedAt, remoteUpdatedAt, photoFileId, tombstones) is preserved.
+    // Dropping it would make the app re-add instead of update.
+    final record = current == null
+        ? PersonalRecord(
+            aadhaarNumber: aadhaarNumber,
+            fullName: _fullName.text.trim(),
+            fatherName: _fatherName.text.trim(),
+            motherName: _motherName.text.trim(),
+            mobileNumber: Validators.normaliseMobile(_mobile.text.trim()),
+            email: _email.text.trim().toLowerCase(),
+            address: _address.text.trim(),
+            dateOfBirth: _dob!,
+            gender: _gender,
+            photoPath: _photoPath,
+            createdAt: now,
+            updatedAt: now,
+          )
+        : current.copyWith(
+            aadhaarNumber: aadhaarNumber,
+            fullName: _fullName.text.trim(),
+            fatherName: _fatherName.text.trim(),
+            motherName: _motherName.text.trim(),
+            mobileNumber: Validators.normaliseMobile(_mobile.text.trim()),
+            email: _email.text.trim().toLowerCase(),
+            address: _address.text.trim(),
+            dateOfBirth: _dob!,
+            gender: _gender,
+            photoPath: _photoPath,
+            clearPhoto: _photoPath == null,
+            updatedAt: now,
+          );
 
     try {
       final controller = ref.read(recordsProvider.notifier);
+
+      // Aadhaar is the unique identity: block creating a duplicate locally.
+      if (existing == null) {
+        final clash = await ref
+            .read(recordRepositoryProvider)
+            .getByAadhaar(aadhaarNumber);
+        if (clash != null && mounted) {
+          setState(() => _submitting = false);
+          messenger.showSnackBar(
+            SnackBar(
+              content: Text(
+                'A record with Aadhaar $aadhaarNumber already exists.',
+              ),
+            ),
+          );
+          return;
+        }
+      }
+
       await controller.save(record, isNew: existing == null);
 
       // Do not block the UI on connectivity; trigger a best-effort sync.
@@ -243,6 +286,17 @@ class _RecordFormScreenState extends ConsumerState<RecordFormScreen> {
                 ),
               ),
             const SizedBox(height: AppSpacing.xl),
+            AppTextField(
+              label: 'Aadhaar number *',
+              controller: _aadhaar,
+              validator: Validators.aadhaar,
+              keyboardType: TextInputType.number,
+              prefixIcon: Icons.badge_outlined,
+              textInputAction: TextInputAction.next,
+              readOnly: existing != null,
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: AppSpacing.md),
             AppTextField(
               label: 'Full name *',
               controller: _fullName,

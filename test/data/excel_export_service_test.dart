@@ -5,7 +5,7 @@ import 'package:record_vault/data/models/personal_record.dart';
 import 'package:record_vault/data/services/excel_export_service.dart';
 
 PersonalRecord sample() => PersonalRecord(
-  id: 'id-1',
+  aadhaarNumber: '123456789012',
   fullName: 'Asha Verma',
   fatherName: 'Ramesh Verma',
   motherName: 'Sunita Verma',
@@ -30,7 +30,7 @@ void main() {
     expect(sheet, isNotNull);
 
     final rows = sheet!.rows;
-    expect(rows.first.first!.value.toString(), contains('Record ID'));
+    expect(rows.first.first!.value.toString(), contains('Aadhaar Number'));
     expect(rows.length, 2);
 
     final firstDataRow = rows[1];
@@ -45,7 +45,10 @@ void main() {
     final excel = Excel.decodeBytes(bytes);
     final sheet = excel.tables[ExcelExportService.sheetName]!;
     expect(sheet.rows.length, 1);
-    expect(sheet.rows.first.first!.value.toString(), contains('Record ID'));
+    expect(
+      sheet.rows.first.first!.value.toString(),
+      contains('Aadhaar Number'),
+    );
   });
 
   test('header count matches the exported column list', () {

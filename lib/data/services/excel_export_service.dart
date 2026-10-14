@@ -17,7 +17,7 @@ class ExcelExportService {
   static const String sheetName = 'Records';
 
   static const List<String> headers = <String>[
-    'Record ID',
+    'Aadhaar Number',
     'Full Name',
     "Father's Name",
     "Mother's Name",
@@ -51,7 +51,7 @@ class ExcelExportService {
 
     for (final record in records) {
       sheet.appendRow(<CellValue?>[
-        TextCellValue(record.id),
+        TextCellValue(record.aadhaarNumber),
         TextCellValue(record.fullName),
         TextCellValue(record.fatherName),
         TextCellValue(record.motherName),

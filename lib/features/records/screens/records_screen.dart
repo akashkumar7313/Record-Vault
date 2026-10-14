@@ -32,7 +32,7 @@ class RecordsScreen extends ConsumerWidget {
       destructive: true,
     );
     if (!confirmed) return;
-    await ref.read(recordsProvider.notifier).softDelete(record.id);
+    await ref.read(recordsProvider.notifier).softDelete(record.aadhaarNumber);
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -93,7 +93,7 @@ class RecordsScreen extends ConsumerWidget {
                         : 'No matching records',
                     message: query.isEmpty
                         ? 'Tap the + button to add your first record.'
-                        : 'Try a different name, mobile number or record ID.',
+                        : 'Try a different name, mobile number or Aadhaar number.',
                     actionLabel: query.isEmpty ? 'Add record' : null,
                     onAction: query.isEmpty ? () => _openCreate(context) : null,
                   );
@@ -113,7 +113,7 @@ class RecordsScreen extends ConsumerWidget {
                     final record = records[index];
                     return RecordCard(
                       record: record,
-                      onTap: () => _openDetails(context, record.id),
+                      onTap: () => _openDetails(context, record.aadhaarNumber),
                       onEdit: () => _openEdit(context, record),
                       onDelete: () => _confirmDelete(context, ref, record),
                     );
@@ -125,6 +125,7 @@ class RecordsScreen extends ConsumerWidget {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
+        heroTag: 'records_add_record',
         onPressed: () => _openCreate(context),
         icon: const Icon(Icons.add),
         label: const Text('Add record'),
@@ -143,7 +144,8 @@ class RecordsScreen extends ConsumerWidget {
     );
   }
 
-  void _openDetails(BuildContext context, String id) {
-    Navigator.of(context).pushNamed(AppRoutes.recordDetails, arguments: id);
+  void _openDetails(BuildContext context, String aadhaarNumber) {
+    Navigator.of(context)
+        .pushNamed(AppRoutes.recordDetails, arguments: aadhaarNumber);
   }
 }

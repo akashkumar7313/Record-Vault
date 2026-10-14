@@ -8,13 +8,13 @@ import 'package:record_vault/data/repositories/record_repository.dart';
 import '../helpers/test_database.dart';
 
 PersonalRecord sample({
-  String id = 'id-1',
+  String aadhaar = '123456789012',
   String name = 'Asha Verma',
   String mobile = '9876543210',
 }) {
   final now = DateTime.utc(2024, 1, 1);
   return PersonalRecord(
-    id: id,
+    aadhaarNumber: aadhaar,
     fullName: name,
     mobileNumber: mobile,
     email: 'asha@example.com',
@@ -49,21 +49,34 @@ void main() {
 
   test('update bumps updatedAt and resets to pending', () async {
     final record = await repository.create(sample());
-    await repository.markSynced(record.id);
+    await repository.markSynced(record.aadhaarNumber);
 
-    final synced = (await repository.getById(record.id))!;
+    final synced = (await repository.getByAadhaar(record.aadhaarNumber))!;
     expect(synced.syncStatus, SyncStatus.synced);
 
     await repository.update(synced.copyWith(fullName: 'Asha V. Verma'));
-    final updated = (await repository.getById(record.id))!;
+    final updated = (await repository.getByAadhaar(record.aadhaarNumber))!;
     expect(updated.fullName, 'Asha V. Verma');
     expect(updated.syncStatus, SyncStatus.pending);
     expect(updated.updatedAt.isAfter(synced.updatedAt), isTrue);
   });
 
+  test(
+    'creating a duplicate Aadhaar replaces rather than duplicates',
+    () async {
+      await repository.create(sample(name: 'First'));
+      await repository.create(sample(name: 'Second'));
+      expect(await repository.count(), 1);
+      expect(
+        (await repository.getByAadhaar('123456789012'))!.fullName,
+        'Second',
+      );
+    },
+  );
+
   test('soft delete hides record but keeps tombstone', () async {
     await repository.create(sample());
-    await repository.markDeleted('id-1');
+    await repository.markDeleted('123456789012');
 
     expect(await repository.count(), 0);
     expect(await repository.getAll(), isEmpty);
@@ -77,26 +90,26 @@ void main() {
 
   test('hard delete removes the row', () async {
     await repository.create(sample());
-    await repository.hardDelete('id-1');
+    await repository.hardDelete('123456789012');
     expect(await repository.getAll(includeDeleted: true), isEmpty);
   });
 
-  test('search matches name, mobile and id (case-insensitive)', () async {
+  test('search matches name, mobile and Aadhaar', () async {
     await repository.create(sample());
     await repository.create(
-      sample(id: 'id-2', name: 'John Doe', mobile: '1112223333'),
+      sample(aadhaar: '999988887777', name: 'John Doe', mobile: '1112223333'),
     );
 
     expect(await repository.search('asha'), hasLength(1));
     expect(await repository.search('9876'), hasLength(1));
-    expect(await repository.search('ID-2'), hasLength(1));
+    expect(await repository.search('9999'), hasLength(1));
     expect(await repository.search('zzz'), isEmpty);
   });
 
   test('syncStatusCounts groups correctly', () async {
-    await repository.create(sample(id: 'a'));
-    await repository.create(sample(id: 'b'));
-    await repository.markSynced('a');
+    await repository.create(sample(aadhaar: '111111111111'));
+    await repository.create(sample(aadhaar: '222222222222'));
+    await repository.markSynced('111111111111');
 
     final counts = await repository.statusCounts();
     expect(counts[SyncStatus.synced], 1);
@@ -109,24 +122,37 @@ void main() {
     await repository.update(record.copyWith(fullName: 'Changed meanwhile'));
 
     final didMark = await repository.markSynced(
-      record.id,
+      record.aadhaarNumber,
       expectedUpdatedAt: staleVersion,
     );
     expect(didMark, isFalse);
-    final current = (await repository.getById(record.id))!;
+    final current = (await repository.getByAadhaar(record.aadhaarNumber))!;
     expect(current.syncStatus, SyncStatus.pending);
     expect(current.fullName, 'Changed meanwhile');
   });
 
+  test('markSynced stores the returned photo file id', () async {
+    final record = await repository.create(sample());
+    await repository.markSynced(
+      record.aadhaarNumber,
+      photoFileId: 'drive-photo-1',
+    );
+    final synced = (await repository.getByAadhaar('123456789012'))!;
+    expect(synced.photoFileId, 'drive-photo-1');
+  });
+
   test('conflict resolution transitions status', () async {
     await repository.create(sample());
-    await repository.markConflict('id-1');
-    expect((await repository.getById('id-1'))!.syncStatus, SyncStatus.conflict);
+    await repository.markConflict('123456789012');
+    expect(
+      (await repository.getByAadhaar('123456789012'))!.syncStatus,
+      SyncStatus.conflict,
+    );
 
     // Conflicts are excluded from the push queue until resolved.
     expect(await repository.getPending(), isEmpty);
 
-    await repository.resolveKeepLocal('id-1');
+    await repository.resolveKeepLocal('123456789012');
     expect(await repository.getPending(), hasLength(1));
   });
 

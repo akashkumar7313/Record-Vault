@@ -7,9 +7,13 @@ import 'sync_status.dart';
 ///
 /// Immutable and null-safe. Instances are safe to pass between the UI,
 /// repository and sync layers. Personal values must never be logged.
+///
+/// The [aadhaarNumber] is the single, unique identity of a record — there is no
+/// separate surrogate id. It doubles as the idempotency key with the server so
+/// retries can never create duplicate rows.
 class PersonalRecord {
   const PersonalRecord({
-    required this.id,
+    required this.aadhaarNumber,
     required this.fullName,
     this.fatherName = '',
     this.motherName = '',
@@ -19,6 +23,7 @@ class PersonalRecord {
     required this.dateOfBirth,
     this.gender = Gender.other,
     this.photoPath,
+    this.photoFileId,
     required this.createdAt,
     required this.updatedAt,
     this.syncStatus = SyncStatus.pending,
@@ -28,8 +33,9 @@ class PersonalRecord {
     this.deletedAt,
   });
 
-  /// UUID v4 identifier. Also used as the idempotency key with the server.
-  final String id;
+  /// 12-digit Aadhaar number. Unique identity of the record and the idempotency
+  /// key used when syncing with the server.
+  final String aadhaarNumber;
   final String fullName;
   final String fatherName;
   final String motherName;
@@ -41,6 +47,9 @@ class PersonalRecord {
 
   /// Absolute path to the locally stored copy of the profile photo.
   final String? photoPath;
+
+  /// Google Drive file id of the photo uploaded by the server, if any.
+  final String? photoFileId;
 
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -58,10 +67,19 @@ class PersonalRecord {
 
   bool get hasPhoto => photoPath != null && photoPath!.isNotEmpty;
 
+  bool get hasRemotePhoto => photoFileId != null && photoFileId!.isNotEmpty;
+
+  /// Public Google Drive thumbnail URL for the synced photo, if any.
+  String? get photoUrl {
+    final fileId = photoFileId;
+    if (fileId == null || fileId.isEmpty) return null;
+    return 'https://drive.google.com/thumbnail?id=$fileId&sz=w512';
+  }
+
   bool get isDirty => syncStatus != SyncStatus.synced;
 
   PersonalRecord copyWith({
-    String? id,
+    String? aadhaarNumber,
     String? fullName,
     String? fatherName,
     String? motherName,
@@ -72,6 +90,7 @@ class PersonalRecord {
     Gender? gender,
     String? photoPath,
     bool clearPhoto = false,
+    String? photoFileId,
     DateTime? createdAt,
     DateTime? updatedAt,
     SyncStatus? syncStatus,
@@ -83,7 +102,7 @@ class PersonalRecord {
     bool clearDeletedAt = false,
   }) {
     return PersonalRecord(
-      id: id ?? this.id,
+      aadhaarNumber: aadhaarNumber ?? this.aadhaarNumber,
       fullName: fullName ?? this.fullName,
       fatherName: fatherName ?? this.fatherName,
       motherName: motherName ?? this.motherName,
@@ -93,6 +112,7 @@ class PersonalRecord {
       dateOfBirth: dateOfBirth ?? this.dateOfBirth,
       gender: gender ?? this.gender,
       photoPath: clearPhoto ? null : (photoPath ?? this.photoPath),
+      photoFileId: photoFileId ?? this.photoFileId,
       createdAt: createdAt ?? this.createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
       syncStatus: syncStatus ?? this.syncStatus,
@@ -111,7 +131,7 @@ class PersonalRecord {
 
   Map<String, Object?> toMap() {
     return <String, Object?>{
-      'id': id,
+      'aadhaar_number': aadhaarNumber,
       'full_name': fullName,
       'father_name': fatherName,
       'mother_name': motherName,
@@ -121,6 +141,7 @@ class PersonalRecord {
       'date_of_birth': dateOfBirth.toUtc().toIso8601String(),
       'gender': gender.storageValue,
       'photo_path': photoPath,
+      'photo_file_id': photoFileId,
       'created_at': createdAt.toUtc().toIso8601String(),
       'updated_at': updatedAt.toUtc().toIso8601String(),
       'sync_status': syncStatus.storageValue,
@@ -133,7 +154,7 @@ class PersonalRecord {
 
   factory PersonalRecord.fromMap(Map<String, Object?> map) {
     return PersonalRecord(
-      id: (map['id'] as String?) ?? '',
+      aadhaarNumber: (map['aadhaar_number'] as String?) ?? '',
       fullName: (map['full_name'] as String?) ?? '',
       fatherName: (map['father_name'] as String?) ?? '',
       motherName: (map['mother_name'] as String?) ?? '',
@@ -143,6 +164,7 @@ class PersonalRecord {
       dateOfBirth: _parseDate(map['date_of_birth']) ?? DateTime(1900),
       gender: Gender.fromStorage(map['gender'] as String?),
       photoPath: map['photo_path'] as String?,
+      photoFileId: map['photo_file_id'] as String?,
       createdAt: _parseDate(map['created_at']) ?? DateTime.now().toUtc(),
       updatedAt: _parseDate(map['updated_at']) ?? DateTime.now().toUtc(),
       syncStatus: SyncStatus.fromStorage(map['sync_status'] as String?),
@@ -159,9 +181,12 @@ class PersonalRecord {
 
   /// Payload sent to the Apps Script endpoint. Deliberately excludes local-only
   /// fields such as [syncStatus], [photoPath] and tombstones.
-  Map<String, Object?> toRemoteJson() {
+  ///
+  /// [photoBase64] carries the optional photo upload; the server stores it in
+  /// Google Drive and returns a [photoFileId].
+  Map<String, Object?> toRemoteJson({String? photoBase64}) {
     return <String, Object?>{
-      'id': id,
+      'aadhaarNumber': aadhaarNumber,
       'fullName': fullName,
       'fatherName': fatherName,
       'motherName': motherName,
@@ -170,6 +195,7 @@ class PersonalRecord {
       'address': address,
       'dateOfBirth': dateOfBirth.toUtc().toIso8601String(),
       'gender': gender.storageValue,
+      'photoBase64': ?photoBase64,
       'createdAt': createdAt.toUtc().toIso8601String(),
       'updatedAt': updatedAt.toUtc().toIso8601String(),
     };
@@ -185,7 +211,15 @@ class PersonalRecord {
         _parseDate(_pick(json, const ['updatedAt', 'updated_at', 'updated'])) ??
         created;
     return PersonalRecord(
-      id: (_pickString(json, const ['id', 'recordId', 'record_id'])) ?? '',
+      aadhaarNumber:
+          _pickString(json, const [
+            'aadhaarNumber',
+            'aadhaar_number',
+            'aadhaar',
+            'id',
+            'recordId',
+          ]) ??
+          '',
       fullName:
           _pickString(json, const ['fullName', 'full_name', 'name']) ?? '',
       fatherName: _pickString(json, const ['fatherName', 'father_name']) ?? '',
@@ -205,6 +239,7 @@ class PersonalRecord {
           ) ??
           DateTime(1900),
       gender: Gender.fromStorage(_pickString(json, const ['gender'])),
+      photoFileId: _pickString(json, const ['photoFileId', 'photo_file_id']),
       createdAt: created,
       updatedAt: updated,
       syncStatus: SyncStatus.synced,
@@ -266,8 +301,8 @@ class PersonalRecord {
 
   @override
   String toString() =>
-      'PersonalRecord(id: $id, syncStatus: ${syncStatus.name}, '
-      'updatedAt: ${updatedAt.toIso8601String()})';
+      'PersonalRecord(aadhaar: $aadhaarNumber, '
+      'syncStatus: ${syncStatus.name}, updatedAt: ${updatedAt.toIso8601String()})';
 }
 
 /// Convenience helpers for encoding lists of records.

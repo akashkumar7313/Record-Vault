@@ -18,21 +18,27 @@ class SyncOperationResult {
     required this.confirmed,
     required this.message,
     this.unsupported = false,
+    this.photoFileId,
   });
 
   const SyncOperationResult.unconfirmed(this.message)
     : confirmed = false,
-      unsupported = false;
+      unsupported = false,
+      photoFileId = null;
 
   const SyncOperationResult.unsupported(this.message)
     : confirmed = false,
-      unsupported = true;
+      unsupported = true,
+      photoFileId = null;
 
   final bool confirmed;
   final String message;
 
   /// True when the server responded but does not implement the action.
   final bool unsupported;
+
+  /// Google Drive file id returned by the server after a photo upload.
+  final String? photoFileId;
 
   static const SyncOperationResult ok = SyncOperationResult(
     confirmed: true,
@@ -86,9 +92,14 @@ class GoogleSheetsService {
         final record = PersonalRecord.fromRemoteJson(
           item.map((k, v) => MapEntry(k.toString(), v)),
         );
-        if (record.id.isNotEmpty) records.add(record);
+        if (record.aadhaarNumber.isNotEmpty) records.add(record);
       }
     }
+    SafeLogger.trace(
+      'SERVER',
+      'read.records',
+      detail: 'count=${records.length} of ${list.length}',
+    );
     return records;
   }
 
@@ -104,39 +115,70 @@ class GoogleSheetsService {
     }
   }
 
-  /// Adds (or upserts) a record. Safe to retry: the server matches on [id].
-  Future<SyncOperationResult> addRecord(PersonalRecord record) {
-    return _mutate('add', record);
+  /// Adds (or upserts) a record, matched on its Aadhaar number. Safe to retry:
+  /// the server matches on [PersonalRecord.aadhaarNumber], so a retried request
+  /// updates the existing row instead of appending a duplicate.
+  Future<SyncOperationResult> addRecord(
+    PersonalRecord record, {
+    String? photoBase64,
+  }) {
+    return _mutate('add', record, photoBase64: photoBase64);
   }
 
-  /// Updates an existing record by id.
-  Future<SyncOperationResult> updateRecord(PersonalRecord record) {
-    return _mutate('update', record);
+  /// Updates an existing record by Aadhaar number.
+  Future<SyncOperationResult> updateRecord(
+    PersonalRecord record, {
+    String? photoBase64,
+  }) {
+    return _mutate('update', record, photoBase64: photoBase64);
   }
 
-  /// Deletes a record by id.
-  Future<SyncOperationResult> deleteRecord(String id) async {
+  /// Deletes a record by Aadhaar number.
+  Future<SyncOperationResult> deleteRecord(String aadhaarNumber) async {
     final decoded = await _sendJson(
       method: 'POST',
       attempts: _writeRetries,
       body: jsonEncode({
         'action': 'delete',
-        'record': {'id': id},
+        'record': {'aadhaarNumber': aadhaarNumber},
       }),
     );
-    return _interpretWrite(decoded, expectedId: id);
+    final result = _interpretWrite(decoded, expectedAadhaar: aadhaarNumber);
+    _logWrite('delete', aadhaarNumber, result);
+    return result;
   }
 
   Future<SyncOperationResult> _mutate(
     String action,
-    PersonalRecord record,
-  ) async {
+    PersonalRecord record, {
+    String? photoBase64,
+  }) async {
     final decoded = await _sendJson(
       method: 'POST',
       attempts: _writeRetries,
-      body: jsonEncode({'action': action, 'record': record.toRemoteJson()}),
+      body: jsonEncode({
+        'action': action,
+        'record': record.toRemoteJson(photoBase64: photoBase64),
+      }),
     );
-    return _interpretWrite(decoded, expectedId: record.id);
+    final result = _interpretWrite(
+      decoded,
+      expectedAadhaar: record.aadhaarNumber,
+    );
+    _logWrite(action, record.aadhaarNumber, result);
+    return result;
+  }
+
+  void _logWrite(String action, String aadhaarNumber, SyncOperationResult r) {
+    final outcome = r.confirmed
+        ? 'confirmed'
+        : (r.unsupported ? 'unsupported' : 'unconfirmed');
+    SafeLogger.trace(
+      'SERVER',
+      'write.$action',
+      id: aadhaarNumber,
+      detail: 'photoFileId=${r.photoFileId == null ? '-' : 'yes'} $outcome',
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -176,14 +218,10 @@ class GoogleSheetsService {
             .get(endpoint, headers: _jsonHeaders)
             .timeout(_timeout);
       } else {
-        // Apps Script web apps respond to POST with a redirect to a
-        // script.googleusercontent.com URL. The http package follows the
-        // redirect automatically.
-        response = await _client
-            .post(endpoint, headers: _jsonHeaders, body: body)
-            .timeout(_timeout);
+        response = await _post(body: body ?? '').timeout(_timeout);
       }
     } on TimeoutException catch (e, s) {
+      SafeLogger.error('SERVER $method', e, s);
       throw AppException(
         AppErrorType.timeout,
         'The server took too long to respond.',
@@ -191,8 +229,15 @@ class GoogleSheetsService {
         stackTrace: s,
       );
     } catch (e, s) {
+      SafeLogger.error('SERVER $method', e, s);
       throw AppException.from(e, s);
     }
+
+    SafeLogger.trace(
+      'SERVER',
+      method,
+      detail: 'host=${endpoint.host} status=${response.statusCode}',
+    );
 
     if (response.statusCode >= 500) {
       throw AppException(
@@ -236,6 +281,43 @@ class GoogleSheetsService {
     }
   }
 
+  /// Sends a POST and manually follows the Apps Script redirect.
+  ///
+  /// Apps Script replies to a POST with a `302` pointing at a
+  /// `script.googleusercontent.com` "echo" URL that must be fetched with GET.
+  /// Dart's HTTP client does not reliably follow that method-changing redirect,
+  /// so we do it ourselves. The same client is reused so the session cookie set
+  /// by the redirect is carried across.
+  Future<http.Response> _post({required String body}) async {
+    final request = http.Request('POST', endpoint)
+      ..headers.addAll(_jsonHeaders)
+      ..body = body
+      ..followRedirects = false;
+
+    final streamed = await _client.send(request);
+    var response = await http.Response.fromStream(streamed);
+
+    var hops = 0;
+    while (response.statusCode >= 300 &&
+        response.statusCode < 400 &&
+        hops < 5) {
+      final location = response.headers['location'];
+      if (location == null || location.isEmpty) break;
+      final target = endpoint.resolve(location);
+      response = await _client.get(target, headers: _jsonHeaders);
+      hops++;
+    }
+
+    if (hops > 0) {
+      SafeLogger.trace(
+        'SERVER',
+        'redirect',
+        detail: 'followed=$hops final=${response.statusCode}',
+      );
+    }
+    return response;
+  }
+
   // ---------------------------------------------------------------------------
   // Parsing helpers
   // ---------------------------------------------------------------------------
@@ -259,7 +341,9 @@ class GoogleSheetsService {
         final value = map[key];
         if (value is List) return value;
       }
-      if (map.containsKey('id')) return [map];
+      if (map.containsKey('aadhaarNumber') || map.containsKey('id')) {
+        return [map];
+      }
     }
     throw const AppException(
       AppErrorType.malformedResponse,
@@ -269,7 +353,7 @@ class GoogleSheetsService {
 
   SyncOperationResult _interpretWrite(
     dynamic decoded, {
-    required String expectedId,
+    required String expectedAadhaar,
   }) {
     if (decoded is List) {
       if (decoded.isEmpty) {
@@ -281,6 +365,11 @@ class GoogleSheetsService {
     }
     if (decoded is Map) {
       final map = decoded.map((k, v) => MapEntry(k.toString(), v));
+
+      final photoFileId =
+          map['photoFileId']?.toString().trim().isNotEmpty == true
+          ? map['photoFileId'].toString().trim()
+          : null;
 
       final error = map['error'];
       if (error != null) {
@@ -306,15 +395,51 @@ class GoogleSheetsService {
       }
 
       final success = map['success'];
+      final statusValue = map['status']?.toString().trim().toLowerCase();
+      final statusOk =
+          statusValue == 'success' ||
+          statusValue == 'ok' ||
+          statusValue == 'added' ||
+          statusValue == 'updated' ||
+          statusValue == 'deleted' ||
+          statusValue == 'upserted';
+      final messageValue = map['message']?.toString().trim().toLowerCase();
+      final unsupportedMessage =
+          messageValue != null &&
+          (messageValue.contains('unsupported') ||
+              messageValue.contains('unknown action') ||
+              messageValue.contains('not implemented'));
+
       if (success is bool) {
-        return success
-            ? SyncOperationResult.ok
-            : const SyncOperationResult.unconfirmed(
-                'Server did not confirm the change.',
-              );
+        if (success) {
+          return SyncOperationResult(
+            confirmed: true,
+            message: 'Confirmed by server',
+            photoFileId: photoFileId,
+          );
+        }
+        if (unsupportedMessage) {
+          return SyncOperationResult.unsupported(
+            'The server does not support this action yet.',
+          );
+        }
+        return SyncOperationResult(
+          confirmed: false,
+          message: messageValue != null && messageValue.isNotEmpty
+              ? 'Server did not confirm the change: ${map['message']}'
+              : 'Server did not confirm the change.',
+        );
       }
 
-      for (final key in const ['status', 'result', 'state', 'message']) {
+      if (statusOk) {
+        return SyncOperationResult(
+          confirmed: true,
+          message: 'Confirmed by server',
+          photoFileId: photoFileId,
+        );
+      }
+
+      for (final key in const ['result', 'state', 'message']) {
         final value = map[key]?.toString().trim().toLowerCase();
         if (value == null || value.isEmpty) continue;
         if (value.contains('success') ||
@@ -323,7 +448,11 @@ class GoogleSheetsService {
             value == 'updated' ||
             value == 'deleted' ||
             value == 'upserted') {
-          return SyncOperationResult.ok;
+          return SyncOperationResult(
+            confirmed: true,
+            message: 'Confirmed by server',
+            photoFileId: photoFileId,
+          );
         }
         if (value.contains('unknown action') ||
             value.contains('unsupported') ||
@@ -333,7 +462,7 @@ class GoogleSheetsService {
           );
         }
         if (value.contains('error') || value.contains('fail')) {
-          return SyncOperationResult(
+          return const SyncOperationResult(
             confirmed: false,
             message: 'Server did not confirm the change.',
           );
@@ -341,11 +470,20 @@ class GoogleSheetsService {
       }
 
       // Echo of the affected record counts as confirmation.
-      final echoedId =
+      final echoedAadhaar =
+          map['aadhaarNumber'] ??
           map['id'] ??
-          (map['record'] is Map ? (map['record'] as Map)['id'] : null);
-      if (echoedId != null && echoedId.toString() == expectedId) {
-        return SyncOperationResult.ok;
+          (map['record'] is Map
+              ? (map['record'] as Map)['aadhaarNumber'] ??
+                    (map['record'] as Map)['id']
+              : null);
+      if (echoedAadhaar != null &&
+          echoedAadhaar.toString() == expectedAadhaar) {
+        return SyncOperationResult(
+          confirmed: true,
+          message: 'Confirmed by server',
+          photoFileId: photoFileId,
+        );
       }
     }
     return const SyncOperationResult.unconfirmed(

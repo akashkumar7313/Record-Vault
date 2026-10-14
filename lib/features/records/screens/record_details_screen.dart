@@ -14,13 +14,14 @@ import '../../../core/widgets/sync_status_chip.dart';
 import '../../../data/models/personal_record.dart';
 import '../../../data/models/sync_status.dart';
 import '../../../data/providers/data_providers.dart';
+import '../../settings/providers/settings_providers.dart';
 import '../providers/records_providers.dart';
 
 /// Full read-only view of a single record with edit/delete/resolve actions.
 class RecordDetailsScreen extends ConsumerWidget {
-  const RecordDetailsScreen({super.key, required this.recordId});
+  const RecordDetailsScreen({super.key, required this.aadhaarNumber});
 
-  final String recordId;
+  final String aadhaarNumber;
 
   Future<void> _edit(BuildContext context, PersonalRecord record) async {
     await Navigator.of(context).pushNamed(
@@ -30,7 +31,9 @@ class RecordDetailsScreen extends ConsumerWidget {
   }
 
   Future<void> _delete(BuildContext context, WidgetRef ref) async {
-    final record = await ref.read(recordRepositoryProvider).getById(recordId);
+    final record = await ref
+        .read(recordRepositoryProvider)
+        .getByAadhaar(aadhaarNumber);
     if (record == null || !context.mounted) return;
 
     final confirmed = await ConfirmDialog.show(
@@ -44,20 +47,30 @@ class RecordDetailsScreen extends ConsumerWidget {
     );
     if (!confirmed || !context.mounted) return;
 
-    await ref.read(recordsProvider.notifier).softDelete(recordId);
+    await ref.read(recordsProvider.notifier).softDelete(aadhaarNumber);
+
+    // Push the deletion to the sheet right away so it doesn't linger remotely.
+    // If we are offline the tombstone stays queued and retries later.
+    final report = await ref
+        .read(syncControllerProvider.notifier)
+        .syncNow(auto: true);
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        const SnackBar(
-          content: Text('Record deleted. Deletion will sync later.'),
+        SnackBar(
+          content: Text(
+            report != null && report.serverReachable
+                ? 'Record deleted.'
+                : 'Record deleted. It will sync when you are online.',
+          ),
         ),
       );
     Navigator.of(context).pop();
   }
 
   Future<void> _keepLocal(BuildContext context, WidgetRef ref) async {
-    await ref.read(recordsProvider.notifier).resolveKeepLocal(recordId);
+    await ref.read(recordsProvider.notifier).resolveKeepLocal(aadhaarNumber);
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
@@ -73,7 +86,9 @@ class RecordDetailsScreen extends ConsumerWidget {
   ) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
-      final remote = await ref.read(syncServiceProvider).fetchRemote(recordId);
+      final remote = await ref
+          .read(syncServiceProvider)
+          .fetchRemote(aadhaarNumber);
       if (remote == null) {
         messenger.showSnackBar(
           const SnackBar(
@@ -97,7 +112,7 @@ class RecordDetailsScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final recordAsync = ref.watch(recordByIdProvider(recordId));
+    final recordAsync = ref.watch(recordByAadhaarProvider(aadhaarNumber));
 
     return Scaffold(
       appBar: AppBar(title: const Text('Record details')),
@@ -195,8 +210,8 @@ class RecordDetailsScreen extends ConsumerWidget {
             ),
             const Divider(),
             InfoTile(
-              label: 'Record ID',
-              value: record.id,
+              label: 'Aadhaar number',
+              value: record.aadhaarNumber,
               icon: Icons.tag,
               copyable: true,
             ),
@@ -282,6 +297,7 @@ class _HeaderCard extends StatelessWidget {
             RecordAvatar(
               name: record.fullName,
               photoPath: record.photoPath,
+              photoUrl: record.photoUrl,
               radius: 44,
             ),
             const SizedBox(height: AppSpacing.md),
