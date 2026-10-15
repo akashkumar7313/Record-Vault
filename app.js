@@ -3,12 +3,19 @@
 
   const DEFAULT_ENDPOINT =
     "https://script.google.com/macros/s/AKfycbwln52lRzFfn-G-jTntwRBWm3ijeOZXjNEJZAKX7DHMm7iKvWO8dfL-lw5rVWscnQ4NJQ/exec";
-  const TIMEOUT_MS = 20000;
-  const READ_RETRIES = 3;
+  const TIMEOUT_MS = 45000;
+  const READ_RETRIES = 2;
   const WRITE_RETRIES = 2;
   const BACKOFF_MS = 600;
   const RECENT_LIMIT = 5;
   const APP_VERSION = "1.0.0";
+
+  const AUTH = {
+    mobiles: ["9389885644", "9956513630"],
+    otp: "231001",
+    sessionMs: 30 * 60 * 1000,
+    key: "rv_session",
+  };
 
   const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const GENDERS = [
@@ -31,6 +38,12 @@
     lastSyncAt: null,
     themeMode: "system",
     online: navigator.onLine,
+    demoMode: false,
+    hasCache: false,
+    authed: false,
+    loginStep: "mobile",
+    loginMobile: "",
+    loginError: "",
   };
 
   const el = (id) => document.getElementById(id);
@@ -52,6 +65,68 @@
 
   function hasCustomEndpoint() {
     return endpoint() !== DEFAULT_ENDPOINT;
+  }
+
+  /* ---- Auth (mobile + OTP) ---- */
+  function getSession() {
+    try {
+      const raw = localStorage.getItem(AUTH.key);
+      if (!raw) return null;
+      const data = JSON.parse(raw);
+      if (!data || !data.mobile || !data.expiresAt) return null;
+      return data;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function clearSession() {
+    localStorage.removeItem(AUTH.key);
+  }
+
+  function isAuthed() {
+    const s = getSession();
+    if (!s) return false;
+    if (Date.now() >= Number(s.expiresAt)) {
+      clearSession();
+      return false;
+    }
+    return true;
+  }
+
+  function saveSession(mobile) {
+    localStorage.setItem(
+      AUTH.key,
+      JSON.stringify({ mobile, loginAt: Date.now(), expiresAt: Date.now() + AUTH.sessionMs })
+    );
+  }
+
+  function lockApp(message, clearCache) {
+    clearSession();
+    if (clearCache) {
+      try { localStorage.removeItem("rv_cache"); } catch (e) { }
+    }
+    S.authed = false;
+    S.loginStep = "mobile";
+    S.loginMobile = "";
+    S.loginError = "";
+    S.query = "";
+    S.tab = "dashboard";
+    S.records = [];
+    S.hasCache = false;
+    closeSheet();
+    render();
+    if (message) snackbar(message, 4500);
+  }
+
+  let authTimer = null;
+  function startAuthTimer() {
+    if (authTimer) clearInterval(authTimer);
+    authTimer = setInterval(() => {
+      if (S.authed && !isAuthed()) {
+        lockApp("Session expired. Please sign in again.", false);
+      }
+    }, 15000);
   }
 
   function parseDateAny(value) {
@@ -221,6 +296,70 @@
     { key: "addressCorrect", header: "Address Correct", label: "Address Correct", icon: "home_pin", type: "textarea", placeholder: "Corrected address (if any)", validator: Validators.addressCorrect },
     { key: "mobileNumberCorrect", header: "Mobile Number Correct", label: "Mobile Number Correct", icon: "call", type: "text", numeric: 10, placeholder: "10-digit mobile number", validator: Validators.mobileNumberCorrect },
     { key: "remarks", header: "Remarks", label: "Remarks", icon: "sticky_note_2", type: "textarea", placeholder: "Any remarks", validator: null },
+  ];
+
+  function demoRecord(base) {
+    const createdAt = new Date(Date.now() - base.ageDays * 864e5);
+    const updatedAt = new Date(Date.now() - base.touchedDays * 864e5);
+    const { ageDays, touchedDays, ...rest } = base;
+    return {
+      applicationNo: "",
+      guardianName: "",
+      relation: "",
+      gender: "",
+      address: "",
+      bankName: "",
+      accountNumber: "",
+      ifscCode: "",
+      addressCorrect: "",
+      mobileNumberCorrect: "",
+      remarks: "",
+      ...rest,
+      createdAt,
+      updatedAt,
+      syncStatus: "synced",
+    };
+  }
+
+  const DEMO_RECORDS = [
+    demoRecord({
+      applicationNo: "RV-2024-001", name: "Anjali Sharma", guardianName: "Rakesh Sharma", relation: "Father",
+      gender: "female", aadhaarNumber: "234512345678", address: "12, Nehru Nagar, Bhopal, Madhya Pradesh 462001",
+      bankName: "State Bank of India", accountNumber: "20145678901", ifscCode: "SBIN0001234",
+      addressCorrect: "12/A, Nehru Nagar, Bhopal, MP 462001", mobileNumberCorrect: "9876543210",
+      remarks: "KYC verified", ageDays: 148, touchedDays: 2,
+    }),
+    demoRecord({
+      applicationNo: "RV-2024-014", name: "Rohan Verma", guardianName: "Suresh Verma", relation: "Father",
+      gender: "male", aadhaarNumber: "345623456789", address: "88, MG Road, Indore, Madhya Pradesh 452001",
+      bankName: "HDFC Bank", accountNumber: "50100234567", ifscCode: "HDFC0000456",
+      addressCorrect: "", mobileNumberCorrect: "9812345670", remarks: "", ageDays: 96, touchedDays: 5,
+    }),
+    demoRecord({
+      applicationNo: "RV-2024-027", name: "Priya Nair", guardianName: "Arun Nair", relation: "Husband",
+      gender: "female", aadhaarNumber: "456734567890", address: "5, Marine Drive, Kochi, Kerala 682031",
+      bankName: "ICICI Bank", accountNumber: "123456789012", ifscCode: "ICIC0001234",
+      addressCorrect: "Flat 5B, Marine Drive, Kochi, Kerala 682031", mobileNumberCorrect: "9765432109",
+      remarks: "Address updated", ageDays: 62, touchedDays: 1,
+    }),
+    demoRecord({
+      applicationNo: "RV-2024-033", name: "Imran Khan", guardianName: "Yusuf Khan", relation: "Father",
+      gender: "male", aadhaarNumber: "567845678901", address: "221, Civil Lines, Lucknow, Uttar Pradesh 226001",
+      bankName: "Punjab National Bank", accountNumber: "33445566778", ifscCode: "PUNB0221000",
+      addressCorrect: "", mobileNumberCorrect: "9700112233", remarks: "", ageDays: 44, touchedDays: 9,
+    }),
+    demoRecord({
+      applicationNo: "RV-2024-041", name: "Kavita Deshmukh", guardianName: "Mahesh Deshmukh", relation: "Father",
+      gender: "female", aadhaarNumber: "678956789012", address: "7, FC Road, Pune, Maharashtra 411004",
+      bankName: "Bank of Baroda", accountNumber: "09988776655", ifscCode: "BARB0PUNEXX",
+      addressCorrect: "", mobileNumberCorrect: "9611223344", remarks: "Docs pending", ageDays: 30, touchedDays: 3,
+    }),
+    demoRecord({
+      applicationNo: "RV-2024-058", name: "Deepak Yadav", guardianName: "Ram Yadav", relation: "Father",
+      gender: "male", aadhaarNumber: "789067890123", address: "45, Ring Road, Jaipur, Rajasthan 302004",
+      bankName: "Axis Bank", accountNumber: "918273645546", ifscCode: "UTIB0000112",
+      addressCorrect: "", mobileNumberCorrect: "9555667788", remarks: "", ageDays: 12, touchedDays: 0,
+    }),
   ];
 
   function genderLabel(value) {
@@ -492,6 +631,44 @@
       <span class="material-symbols-outlined">${s.icon}</span>${s.label}</span>`;
   }
 
+  function recordRowHtml(record, index, withMenu) {
+    const relation = String(record.relation || "").trim();
+    const guardian = String(record.guardianName || "").trim();
+    const guardianText = [relation, guardian].filter(Boolean).join(" ") || "\u2014";
+    const delay = index < 15 ? ` style="animation-delay:${index * 45}ms"` : ` style="animation:none"`;
+    return `
+      <div class="record-row" data-open="${esc(record.aadhaarNumber)}" role="button" tabindex="0"${delay}>
+        ${avatarHtml(record, 23)}
+        <div class="info">
+          <div class="name">${esc(record.name || "Unnamed record")}</div>
+
+<div class="guardian">
+  <span class="v">${esc(relation ? relation.toUpperCase() : "—")} - ${esc(guardian || "—")}</span>
+</div>
+          
+<div class="facts">
+  <span class="fact mono">
+    <span class="material-symbols-outlined">badge</span>
+    <span>Aadhaar No.:</span>
+    ${esc(String(record.aadhaarNumber || "").replace(/\D/g, "").replace(/(\d{4})(?=\d)/g, "$1 "))}
+  </span>
+</div>
+
+        </div>
+        <div class="trail">
+          ${statusChip(record.syncStatus, true)}
+          ${withMenu
+        ? `<button class="icon-btn" data-menu="${esc(record.aadhaarNumber)}" type="button" aria-label="More actions"><span class="material-symbols-outlined">more_vert</span></button>`
+        : `<span class="material-symbols-outlined chev">chevron_right</span>`}
+        </div>
+      </div>`;
+  }
+
+  function recordListHtml(records, withMenu) {
+    const rows = records.map((r, i) => recordRowHtml(r, i, withMenu)).join("");
+    return `<div class="card record-list">${rows}</div>`;
+  }
+
   function stats() {
     const total = S.records.length;
     return { total, synced: total, pending: 0, conflicts: 0 };
@@ -504,6 +681,31 @@
       [r.name, r.guardianName, r.relation, r.aadhaarNumber, r.accountNumber, r.applicationNo, r.bankName, r.mobileNumberCorrect, r.ifscCode]
         .some((v) => String(v || "").toLowerCase().includes(q))
     );
+  }
+
+  function isFullAadhaar(value) {
+    return /^[0-9]{12}$/.test(normAadhaar(value));
+  }
+
+  function exactAadhaarMatch(value) {
+    const digits = normAadhaar(value);
+    if (!/^[0-9]{12}$/.test(digits)) return null;
+    return S.records.find((r) => normAadhaar(r.aadhaarNumber) === digits) || null;
+  }
+
+  function demoBannerHtml() {
+    if (!S.demoMode) return "";
+    return `<div class="banner demo-banner">
+      <div class="row-head"><span class="material-symbols-outlined">experiment</span>Sample preview</div>
+      <p>These are demo records for preview only. Nothing here is saved to your Google Sheet.</p>
+      <button class="btn btn-tonal" id="exitDemo" type="button"><span class="material-symbols-outlined">close</span>Exit preview</button>
+    </div>`;
+  }
+
+  function wireDemoBanner(root) {
+    const exit = el("exitDemo");
+    if (exit) exit.addEventListener("click", exitDemoMode);
+    root.querySelectorAll("[data-demo]").forEach((n) => n.addEventListener("click", enterDemoMode));
   }
 
   function snackbar(message, ms) {
@@ -600,6 +802,7 @@
   }
 
   function renderNav() {
+    el("navbar").hidden = false;
     document.querySelectorAll(".nav-item").forEach((n) => {
       n.classList.toggle("is-active", n.dataset.tab === S.tab);
     });
@@ -608,6 +811,7 @@
   }
 
   function setTab(tab) {
+    if (!S.authed) return;
     if (S.tab === tab) return;
     S.tab = tab;
     try { history.replaceState(null, "", "#" + tab); } catch (e) { }
@@ -616,12 +820,164 @@
   }
 
   /* ---- Views ---- */
+  function renderSkeleton() {
+    const rows = Array.from({ length: 5 })
+      .map(
+        () => `<div class="sk-row">
+          <div class="sk sk-avatar"></div>
+          <div style="flex:1;min-width:0">
+            <div class="sk sk-line" style="width:45%"></div>
+            <div class="sk sk-line" style="width:70%;margin-top:9px"></div>
+            <div class="sk sk-line" style="width:35%;margin-top:9px"></div>
+          </div>
+        </div>`
+      )
+      .join("");
+    const cached = S.hasCache;
+    return `
+      <div class="loading-note">
+        <span class="spinner"></span>
+        <div>
+          <div class="ln-title">Loading your records\u2026</div>
+          <div class="ln-sub">${cached ? "Showing saved records shortly \u2014 refreshing from Google Sheets." : "Fetching from Google Sheets. Large sheets can take a few seconds."}</div>
+        </div>
+      </div>
+      <div class="sk-card sk-summary">
+        <div class="sk sk-circle"></div>
+        <div style="flex:1;min-width:0">
+          <div class="sk sk-line" style="width:55%;height:18px"></div>
+          <div class="sk sk-line" style="width:38%;margin-top:12px"></div>
+        </div>
+      </div>
+      <div class="sk sk-search"></div>
+      <div class="sk-card sk-list">${rows}</div>`;
+  }
+
+  function renderAuth() {
+    el("navbar").hidden = true;
+    el("fab").hidden = true;
+    const bar = el("appbar");
+    bar.classList.remove("scrolled");
+    bar.innerHTML = `<div class="title"><h1>RecordVault</h1><span class="sub">Secure records access</span></div>`;
+
+    const err = S.loginError
+      ? `<div class="auth-error"><span class="material-symbols-outlined">error</span><span>${esc(S.loginError)}</span></div>`
+      : "";
+
+    let inner;
+    if (S.loginStep === "otp") {
+      inner = `
+        <button class="auth-back text-link" id="loginChange" type="button">
+          <span class="material-symbols-outlined">arrow_back</span>${esc(S.loginMobile)}
+        </button>
+        <div class="field">
+          <label>Enter OTP</label>
+          <div class="control">
+            <span class="material-symbols-outlined">password</span>
+            <input id="loginOtp" type="tel" inputmode="numeric" maxlength="6" placeholder="6-digit OTP" autocomplete="one-time-code">
+          </div>
+        </div>
+        <button class="btn btn-filled btn-block" id="loginVerify" type="button">
+          <span class="material-symbols-outlined">login</span>Verify &amp; sign in
+        </button>`;
+    } else {
+      inner = `
+        <div class="field">
+          <label>Mobile number</label>
+          <div class="control">
+            <span class="material-symbols-outlined">smartphone</span>
+            <input id="loginMobile" type="tel" inputmode="numeric" maxlength="10" placeholder="10-digit mobile number" value="${esc(S.loginMobile)}" autocomplete="tel">
+          </div>
+        </div>
+        <button class="btn btn-filled btn-block" id="loginSendOtp" type="button">
+          <span class="material-symbols-outlined">sms</span>Send OTP
+        </button>`;
+    }
+
+    el("content").innerHTML = `
+      <div class="auth-wrap">
+        <div class="auth-brand">
+          <span class="auth-logo material-symbols-outlined">shield_lock</span>
+          <h2>Welcome to RecordVault</h2>
+          <p>${S.loginStep === "otp" ? "Enter the OTP sent to your registered mobile number." : "Sign in with your registered mobile number to continue."}</p>
+        </div>
+        <div class="card auth-card">
+          ${err}
+          ${inner}
+        </div>
+        <p class="auth-foot"><span class="material-symbols-outlined">schedule</span>Session expires after 30 minutes.</p>
+      </div>`;
+
+    if (S.loginStep === "otp") {
+      el("loginChange").addEventListener("click", () => {
+        S.loginStep = "mobile";
+        S.loginError = "";
+        render();
+      });
+      const otp = el("loginOtp");
+      otp.focus();
+      otp.addEventListener("keydown", (e) => { if (e.key === "Enter") el("loginVerify").click(); });
+      el("loginVerify").addEventListener("click", verifyOtp);
+    } else {
+      const mob = el("loginMobile");
+      mob.focus();
+      mob.addEventListener("input", () => { mob.value = mob.value.replace(/[^0-9]/g, "").slice(0, 10); });
+      mob.addEventListener("keydown", (e) => { if (e.key === "Enter") el("loginSendOtp").click(); });
+      el("loginSendOtp").addEventListener("click", sendOtp);
+    }
+  }
+
+  function sendOtp() {
+    const mobile = (el("loginMobile").value || "").replace(/[^0-9]/g, "");
+    S.loginMobile = mobile;
+    if (mobile.length !== 10) {
+      S.loginError = "Enter a valid 10-digit mobile number.";
+      render();
+      return;
+    }
+    if (!AUTH.mobiles.includes(mobile)) {
+      S.loginError = "This mobile number is not authorised to sign in.";
+      render();
+      return;
+    }
+    S.loginStep = "otp";
+    S.loginError = "";
+    render();
+    snackbar("OTP sent to " + mobile, 3000);
+  }
+
+  function verifyOtp() {
+    const code = (el("loginOtp").value || "").replace(/[^0-9]/g, "");
+    if (code.length !== 6) {
+      S.loginError = "Enter the 6-digit OTP.";
+      render();
+      return;
+    }
+    if (code !== AUTH.otp) {
+      S.loginError = "Incorrect OTP. Please try again.";
+      render();
+      return;
+    }
+    saveSession(S.loginMobile);
+    S.authed = true;
+    S.loginStep = "mobile";
+    S.loginMobile = "";
+    S.loginError = "";
+    render();
+    snackbar("Signed in successfully.", 3000);
+    loadRecords();
+  }
+
   function render() {
+    if (!S.authed) {
+      renderAuth();
+      return;
+    }
     renderAppbar();
     renderNav();
     const content = el("content");
     if (S.loading) {
-      content.innerHTML = `<div class="loader"><span class="spinner"></span></div>`;
+      content.innerHTML = renderSkeleton();
       return;
     }
     if (S.error) {
@@ -664,30 +1020,21 @@
     const dash = circumference * value;
 
     const recentHtml = recent.length
-      ? recent
-        .map(
-          (r) => `
-        <div class="recent" data-open="${esc(r.aadhaarNumber)}">
-          ${avatarHtml(r, 22)}
-          <div class="info">
-            <div class="name">${esc(r.name || "Unnamed record")}</div>
-            <div class="contact">${esc(r.mobileNumberCorrect || r.relation || r.applicationNo || "No contact details")}</div>
-            <div class="aadhaar mono">${esc(maskAadhaar(r.aadhaarNumber))}</div>
-          </div>
-          <span class="status-dot">${statusChip(r.syncStatus, true)}</span>
-          <span class="material-symbols-outlined" style="color:var(--on-surface-variant)">chevron_right</span>
-        </div>`
-        )
-        .join("")
+      ? recordListHtml(recent, false)
       : `<div class="empty">
           <span class="material-symbols-outlined">person_add_alt</span>
           <h3>Welcome to RecordVault</h3>
           <p>Store personal records in Google Sheets and access them from anywhere.</p>
+          <div class="btn-row" style="margin-top:18px;width:100%;max-width:380px">
+            <button class="btn btn-filled" id="emptyAdd" type="button"><span class="material-symbols-outlined">add</span>Add record</button>
+            <button class="btn btn-outlined" data-demo type="button"><span class="material-symbols-outlined">experiment</span>Sample data</button>
+          </div>
         </div>`;
 
     c.innerHTML = `
+      ${demoBannerHtml()}
       ${S.online === false ? `<div class="card" style="padding:12px 16px;margin-bottom:12px;background:var(--secondary-container);color:var(--on-secondary-container);border:none">Offline \u2014 changes will be saved when you reconnect.</div>` : ""}
-      <div class="card" style="padding:16px">
+      <div class="card hero" style="padding:16px">
         <div class="summary-head">
           <div class="ring">
             <svg width="68" height="68" viewBox="0 0 68 68">
@@ -695,7 +1042,7 @@
               <circle cx="34" cy="34" r="30" fill="none" stroke="${accent}" stroke-width="6" stroke-linecap="round"
                 stroke-dasharray="${dash} ${circumference}" ></circle>
             </svg>
-            <div class="ring-text">${st.total === 0 ? "\u2014" : `${st.synced}/${st.total}`}</div>
+            <div class="ring-text">${st.total === 0 ? "\u2014" : `${Math.round(value * 100)}%`}</div>
           </div>
           <div style="flex:1;min-width:0">
             <div class="headline">${esc(headline)}</div>
@@ -713,15 +1060,17 @@
         </button>
       </div>
 
-      <div class="section-title"><div><h2>Find a record</h2><p>Search by name, Aadhaar, account or mobile</p></div></div>
+      <div class="section-title"><div><h2>Find a record</h2><p>Search by name, father/husband name, mobile or Aadhaar</p></div></div>
       <div class="search">
         <span class="material-symbols-outlined">search</span>
-        <input id="dashSearch" type="search" placeholder="Search records" value="${esc(S.query)}" autocomplete="off">
+        <input id="dashSearch" type="search" placeholder="Search name, father/husband name, mobile or Aadhaar" value="${esc(S.query)}" autocomplete="off">
+        ${S.query.trim() ? `<button class="icon-btn search-clear" id="dashClear" type="button" aria-label="Clear search"><span class="material-symbols-outlined">close</span></button>` : ""}
       </div>
+      <p class="search-hint"><span class="material-symbols-outlined">bolt</span>Enter a full 12-digit Aadhaar number to open that record instantly.</p>
       ${S.query.trim() ? `<div style="margin-top:8px"><button class="text-link" id="openResults" type="button"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">arrow_forward</span> Open search results in Records</button></div>` : ""}
 
       <div class="section-title"><h2>Recent records</h2><button class="text-link" id="seeAll" type="button">See all</button></div>
-      <div class="card" style="padding:4px">${recentHtml}</div>
+      ${recentHtml}
 
       <div class="section-title"><h2>Quick actions</h2></div>
       <div class="card quick">
@@ -731,12 +1080,40 @@
       </div>`;
 
     el("summarySync").addEventListener("click", () => syncNow(false));
+    const emptyAdd = el("emptyAdd");
+    if (emptyAdd) emptyAdd.addEventListener("click", () => openForm(null));
+    const openMatch = (value) => {
+      const match = exactAadhaarMatch(value);
+      if (!match) return false;
+      S.query = "";
+      openDetails(match.aadhaarNumber);
+      renderDashboard(c);
+      return true;
+    };
     const dashSearch = el("dashSearch");
     dashSearch.addEventListener("input", () => {
       S.query = dashSearch.value;
+      if (openMatch(dashSearch.value)) return;
+      const pos = dashSearch.selectionStart;
+      renderDashboard(c);
+      const next = el("dashSearch");
+      if (next) {
+        next.focus();
+        try { next.setSelectionRange(pos, pos); } catch (e) { }
+      }
     });
     dashSearch.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") setTab("records");
+      if (e.key === "Enter") {
+        if (openMatch(dashSearch.value)) { e.preventDefault(); return; }
+        setTab("records");
+      }
+    });
+    const dashClear = el("dashClear");
+    if (dashClear) dashClear.addEventListener("click", () => {
+      S.query = "";
+      renderDashboard(c);
+      const next = el("dashSearch");
+      if (next) next.focus();
     });
     const openResults = el("openResults");
     if (openResults) openResults.addEventListener("click", () => setTab("records"));
@@ -750,54 +1127,61 @@
         if (q === "settings") setTab("settings");
       })
     );
+    wireDemoBanner(c);
   }
 
   function renderRecords(c) {
+    const st = stats();
     const list = filteredRecords().sort((a, b) => b.updatedAt - a.updatedAt);
+    const fullAadhaar = isFullAadhaar(S.query);
     let listHtml;
     if (!S.records.length) {
       listHtml = `<div class="empty">
         <span class="material-symbols-outlined">person_search</span>
         <h3>No records yet</h3>
-        <p>Tap the + button to add your first record.</p>
-        <button class="btn btn-filled" id="emptyAdd" type="button">Add record</button>
+        <p>Add your first record, or take a quick look at how RecordVault works with sample data.</p>
+        <div class="btn-row" style="margin-top:18px;width:100%;max-width:380px">
+          <button class="btn btn-filled" id="emptyAdd" type="button"><span class="material-symbols-outlined">add</span>Add record</button>
+          <button class="btn btn-outlined" data-demo type="button"><span class="material-symbols-outlined">experiment</span>Sample data</button>
+        </div>
       </div>`;
     } else if (!list.length) {
       listHtml = `<div class="empty">
-        <span class="material-symbols-outlined">person_search</span>
-        <h3>No matching records</h3>
-        <p>Try a different name, Aadhaar, account or mobile number.</p>
+        <span class="material-symbols-outlined">${fullAadhaar ? "badge" : "person_search"}</span>
+        <h3>${fullAadhaar ? "No record for this Aadhaar" : "No matching records"}</h3>
+        <p>${fullAadhaar ? `Nothing found for ${esc(maskAadhaar(S.query))}. Check the number and try again.` : "Try a different name, Aadhaar, account or mobile number."}</p>
       </div>`;
     } else {
-      listHtml = list
-        .map(
-          (r) => `
-        <div class="card record-card">
-          ${avatarHtml(r, 26)}
-          <div class="info" data-open="${esc(r.aadhaarNumber)}">
-            <div class="name">${esc(r.name || "Unnamed record")}</div>
-            <div class="contact">${esc(r.mobileNumberCorrect || r.relation || r.applicationNo || "No contact details")}</div>
-            <div class="meta">
-              ${statusChip(r.syncStatus, true)}
-              <span class="updated">Updated ${esc(fmtDateTime(r.updatedAt))}</span>
-            </div>
-          </div>
-          <button class="icon-btn" data-menu="${esc(r.aadhaarNumber)}" type="button"><span class="material-symbols-outlined">more_vert</span></button>
-        </div>`
-        )
-        .join("");
+      listHtml = recordListHtml(list, true);
     }
 
     c.innerHTML = `
-      <div class="search" style="margin-bottom:12px">
-        <span class="material-symbols-outlined">search</span>
-        <input id="recSearch" type="search" placeholder="Search records" value="${esc(S.query)}" autocomplete="off">
+      ${demoBannerHtml()}
+      <div class="section-title" style="margin-top:4px">
+        <div><h2>All records</h2><p>Search by name, father/husband name, mobile or Aadhaar</p></div>
+        <span class="count-pill"><span class="material-symbols-outlined">people</span>${st.total}</span>
       </div>
+      <div class="search">
+        <span class="material-symbols-outlined">search</span>
+        <input id="recSearch" type="search" placeholder="Search name, father/husband name, mobile or Aadhaar" value="${esc(S.query)}" autocomplete="off">
+        ${S.query.trim() ? `<button class="icon-btn search-clear" id="recClear" type="button" aria-label="Clear search"><span class="material-symbols-outlined">close</span></button>` : ""}
+      </div>
+      <p class="search-hint"><span class="material-symbols-outlined">bolt</span>Enter a full 12-digit Aadhaar number to open that record instantly.</p>
       <div id="recList">${listHtml}</div>`;
+
+    const openMatch = (value) => {
+      const match = exactAadhaarMatch(value);
+      if (!match) return false;
+      S.query = "";
+      openDetails(match.aadhaarNumber);
+      renderRecords(c);
+      return true;
+    };
 
     const search = el("recSearch");
     search.addEventListener("input", () => {
       S.query = search.value;
+      if (openMatch(search.value)) return;
       const pos = search.selectionStart;
       renderRecords(c);
       const next = el("recSearch");
@@ -806,10 +1190,26 @@
         try { next.setSelectionRange(pos, pos); } catch (e) { }
       }
     });
+    search.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && openMatch(search.value)) e.preventDefault();
+    });
+    const clearBtn = el("recClear");
+    if (clearBtn) clearBtn.addEventListener("click", () => {
+      S.query = "";
+      renderRecords(c);
+      const next = el("recSearch");
+      if (next) next.focus();
+    });
     const emptyAdd = el("emptyAdd");
     if (emptyAdd) emptyAdd.addEventListener("click", () => openForm(null));
-    c.querySelectorAll("[data-open]").forEach((n) => n.addEventListener("click", () => openDetails(n.dataset.open)));
+    c.querySelectorAll("[data-open]").forEach((n) => {
+      n.addEventListener("click", () => openDetails(n.dataset.open));
+      n.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetails(n.dataset.open); }
+      });
+    });
     c.querySelectorAll("[data-menu]").forEach((n) => n.addEventListener("click", (e) => openRowMenu(e, n.dataset.menu)));
+    wireDemoBanner(c);
   }
 
   function openRowMenu(event, aadhaar) {
@@ -843,7 +1243,8 @@
   function renderSettings(c) {
     const st = stats();
     c.innerHTML = `
-      <div class="card" style="padding:16px">
+      ${demoBannerHtml()}
+      <div class="card hero" style="padding:16px">
         <div class="summary-head">
           <div class="ring">
             <svg width="68" height="68" viewBox="0 0 68 68">
@@ -851,7 +1252,7 @@
               <circle cx="34" cy="34" r="30" fill="none" stroke="var(--synced)" stroke-width="6" stroke-linecap="round"
                 stroke-dasharray="${2 * Math.PI * 30} ${2 * Math.PI * 30}"></circle>
             </svg>
-            <div class="ring-text">${st.total === 0 ? "\u2014" : `${st.synced}/${st.total}`}</div>
+            <div class="ring-text">${st.total === 0 ? "\u2014" : "100%"}</div>
           </div>
           <div style="flex:1;min-width:0">
             <div class="headline">${st.total === 0 ? "Welcome to your vault" : "Everything is up to date"}</div>
@@ -898,6 +1299,13 @@
         <span class="material-symbols-outlined">chevron_right</span>
       </div>
 
+      <div class="section-label">Account</div>
+      <div class="card setting-row" id="signOutRow" style="cursor:pointer">
+        <span class="material-symbols-outlined" style="color:var(--error)">logout</span>
+        <div class="body"><div class="label">Sign out</div><div class="desc">You will need to sign in again with OTP.</div></div>
+        <span class="material-symbols-outlined">chevron_right</span>
+      </div>
+
       <div class="center muted small" style="text-align:center;margin-top:32px;color:var(--on-surface-variant)">RecordVault ${APP_VERSION}</div>`;
 
     el("settingsSync").addEventListener("click", () => syncNow(false));
@@ -905,7 +1313,12 @@
     el("shareBtn").addEventListener("click", () => doExport(true));
     el("saveBtn").addEventListener("click", () => doExport(false));
     el("privacyRow").addEventListener("click", showPrivacy);
+    el("signOutRow").addEventListener("click", async () => {
+      const ok = await confirmDialog({ title: "Sign out", message: "Are you sure you want to sign out?", confirmLabel: "Sign out", destructive: true });
+      if (ok) lockApp("Signed out.", true);
+    });
     el("themeSeg").querySelectorAll("button").forEach((b) => b.addEventListener("click", () => setThemeMode(b.dataset.mode)));
+    wireDemoBanner(c);
     testConnection();
   }
 
@@ -937,15 +1350,76 @@
   }
 
   /* ---- Data ops ---- */
-  async function loadRecords() {
-    S.loading = true;
+  function enterDemoMode() {
+    S.demoMode = true;
     S.error = null;
+    S.loading = false;
+    S.query = "";
+    S.records = DEMO_RECORDS.map((r) => ({ ...r }));
     render();
+    window.scrollTo({ top: 0 });
+    snackbar("Sample preview loaded. These records are not saved anywhere.", 4000);
+  }
+
+  function exitDemoMode() {
+    S.demoMode = false;
+    S.records = [];
+    loadRecords();
+  }
+
+  const CACHE_KEY = "rv_cache";
+
+  function readCache() {
     try {
-      S.records = await Api.fetchRecords();
-      S.lastSyncAt = new Date();
+      const raw = localStorage.getItem(CACHE_KEY);
+      if (!raw) return [];
+      const list = JSON.parse(raw);
+      if (!Array.isArray(list)) return [];
+      return list
+        .filter((r) => r && r.aadhaarNumber)
+        .map((r) => ({
+          ...r,
+          createdAt: parseDateAny(r.createdAt) || new Date(),
+          updatedAt: parseDateAny(r.updatedAt) || parseDateAny(r.createdAt) || new Date(),
+          syncStatus: "synced",
+        }));
     } catch (e) {
-      S.error = e.message || "Could not reach the server.";
+      return [];
+    }
+  }
+
+  function writeCache(records) {
+    try {
+      const slim = records.map((r) => ({
+        ...r,
+        createdAt: r.createdAt instanceof Date ? r.createdAt.toISOString() : r.createdAt,
+        updatedAt: r.updatedAt instanceof Date ? r.updatedAt.toISOString() : r.updatedAt,
+      }));
+      localStorage.setItem(CACHE_KEY, JSON.stringify(slim));
+    } catch (e) { /* storage full or unavailable */ }
+  }
+
+  async function loadRecords() {
+    S.error = null;
+    const cached = readCache();
+    S.hasCache = cached.length > 0;
+    if (cached.length) {
+      S.records = cached;
+      S.loading = false;
+      render();
+    } else {
+      S.loading = true;
+      render();
+    }
+    try {
+      const records = await Api.fetchRecords();
+      S.records = records;
+      S.lastSyncAt = new Date();
+      S.error = null;
+      writeCache(records);
+    } catch (e) {
+      if (cached.length) snackbar("Could not refresh. Showing saved records.", 4000);
+      else S.error = e.message || "Could not reach the server.";
     } finally {
       S.loading = false;
       render();
@@ -953,6 +1427,10 @@
   }
 
   async function syncNow(auto) {
+    if (S.demoMode) {
+      if (!auto) snackbar("You are viewing sample data. Exit preview to sync your records.", 4000);
+      return;
+    }
     const btns = [el("syncBtn"), el("summarySync"), el("settingsSync")].filter(Boolean);
     btns.forEach((b) => { b.disabled = true; b.classList.add("spin"); });
     try {
@@ -960,6 +1438,7 @@
       S.records = records;
       S.lastSyncAt = new Date();
       S.error = null;
+      writeCache(records);
       render();
       if (!auto) snackbar(`Synced ${records.length} record${records.length === 1 ? "" : "s"}.`);
     } catch (e) {
@@ -971,6 +1450,10 @@
   }
 
   async function deleteRecordFlow(aadhaar) {
+    if (S.demoMode) {
+      snackbar("Sample records cannot be deleted. Exit preview to manage your records.", 4000);
+      return;
+    }
     const record = S.records.find((r) => r.aadhaarNumber === aadhaar);
     if (!record) return;
     const ok = await confirmDialog({
@@ -992,6 +1475,11 @@
 
   /* ---- Form sheet ---- */
   function openForm(existing) {
+    if (!S.authed) return;
+    if (S.demoMode) {
+      snackbar("Sample records are read-only. Exit preview to add or edit records.", 4000);
+      return;
+    }
     const isEdit = !!existing;
     const g = (v) => esc(v == null ? "" : v);
 
@@ -1135,6 +1623,7 @@
 
   /* ---- Details sheet ---- */
   function openDetails(aadhaar) {
+    if (!S.authed) return;
     const record = S.records.find((r) => r.aadhaarNumber === aadhaar);
     if (!record) {
       snackbar("Record not found.");
@@ -1144,69 +1633,77 @@
       <button class="icon-btn" data-close type="button"><span class="material-symbols-outlined">arrow_back</span></button>
       <h2>Record details</h2>`;
 
-    const tile = (icon, label, value, copyable) => `
-      <div class="info-tile">
-        <span class="material-symbols-outlined">${icon}</span>
-        <div class="body"><div class="label">${esc(label)}</div><div class="value">${esc(value || "\u2014")}</div></div>
-        ${copyable && value ? `<button class="copy-btn" data-copy="${esc(value)}" type="button"><span class="material-symbols-outlined" style="font-size:18px">content_copy</span></button>` : ""}
-      </div>`;
+    const guardianLine = [record.relation, record.guardianName]
+      .map((s) => String(s || "").trim())
+      .filter(Boolean)
+      .join(" - ");
+
+    const tile = (icon, label, value, copyable) => {
+      const v = String(value == null ? "" : value).trim();
+      if (!v) return "";
+      return `
+        <div class="info-tile">
+          <span class="material-symbols-outlined">${icon}</span>
+          <div class="body"><div class="label">${esc(label)}</div><div class="value">${esc(v)}</div></div>
+          ${copyable ? `<button class="copy-btn" data-copy="${esc(v)}" type="button" aria-label="Copy"><span class="material-symbols-outlined">content_copy</span></button>` : ""}
+        </div>`;
+    };
+
+    const section = (title, tiles) => {
+      const inner = tiles.filter(Boolean).join("");
+      return inner ? `<div class="section-label">${esc(title)}</div><div class="card tiles">${inner}</div>` : "";
+    };
 
     const body = `
       <div class="card detail-head">
-        ${avatarHtml(record, 44)}
-        <div>
+        ${avatarHtml(record, 30)}
+        <div class="head-info">
           <div class="name">${esc(record.name || "Unnamed record")}</div>
-          ${record.mobileNumberCorrect ? `<div class="mobile">${esc(record.mobileNumberCorrect)}</div>` : ""}
-        </div>
-        <div class="pills">
-          ${statusChip(record.syncStatus)}
-          ${record.relation ? `<span class="pill"><span class="material-symbols-outlined">diversity_3</span>${esc(record.relation)}</span>` : ""}
-          ${record.gender ? `<span class="pill"><span class="material-symbols-outlined">wc</span>${esc(genderLabel(record.gender))}</span>` : ""}
+          ${record.mobileNumberCorrect ? `<div class="mobile"><span class="material-symbols-outlined">call</span>${esc(record.mobileNumberCorrect)}</div>` : ""}
         </div>
       </div>
 
-      <div class="section-label">Identity</div>
-      <div class="card" style="padding:4px 16px">
-        ${tile("confirmation_number", "Application No", record.applicationNo, true)}
-        ${tile("person", "Name", record.name, true)}
-        ${tile("man", "Name / Father's or Husband's", record.guardianName, false)}
-        ${tile("diversity_3", "Relation", record.relation, false)}
-        ${tile("wc", "Male / Female", genderLabel(record.gender), false)}
-        ${tile("badge", "Aadhaar number", record.aadhaarNumber, true)}
+      <div class="detail-pills">
+        ${statusChip(record.syncStatus)}
+        ${guardianLine ? `<span class="pill"><span class="material-symbols-outlined">diversity_3</span>${esc(guardianLine)}</span>` : ""}
+        ${record.gender ? `<span class="pill"><span class="material-symbols-outlined">wc</span>${esc(genderLabel(record.gender))}</span>` : ""}
       </div>
 
-      <div class="section-label">Address</div>
-      <div class="card" style="padding:4px 16px">
-        ${tile("location_on", "Address", record.address, true)}
-        ${tile("home_pin", "Address Correct", record.addressCorrect, true)}
-      </div>
+      ${section("Identity", [
+      tile("confirmation_number", "Application No", record.applicationNo, true),
+      tile("person", "Name", record.name, true),
+        tile("man", "Name / Father's or Husband's", guardianLine, false),
+      tile("wc", "Male / Female", genderLabel(record.gender), false),
+      tile("badge", "Aadhaar number", record.aadhaarNumber, true),
+    ])}
 
-      <div class="section-label">Bank details</div>
-      <div class="card" style="padding:4px 16px">
-        ${tile("account_balance", "Bank Name", record.bankName, false)}
-        ${tile("numbers", "Account Number", record.accountNumber, true)}
-        ${tile("pin", "IFSC Code", record.ifscCode, true)}
-      </div>
+      ${section("Address", [
+      tile("location_on", "Address", record.address, true),
+      tile("home_pin", "Address Correct", record.addressCorrect, true),
+    ])}
 
-      <div class="section-label">Contact</div>
-      <div class="card" style="padding:4px 16px">
-        ${tile("call", "Mobile Number Correct", record.mobileNumberCorrect, true)}
-      </div>
+      ${section("Bank details", [
+      tile("account_balance", "Bank Name", record.bankName, false),
+      tile("numbers", "Account Number", record.accountNumber, true),
+      tile("pin", "IFSC Code", record.ifscCode, true),
+    ])}
+
+      ${section("Contact", [
+      tile("call", "Mobile Number Correct", record.mobileNumberCorrect, true),
+    ])}
 
       ${record.remarks ? `<div class="section-label">Remarks</div><div class="card" style="padding:16px">${esc(record.remarks)}</div>` : ""}
 
-      <div class="section-label">Timestamps</div>
-      <div class="card" style="padding:4px 16px">
-        ${tile("add_circle", "Created", fmtDateTime(record.createdAt), false)}
-        ${tile("update", "Last updated", fmtDateTime(record.updatedAt), false)}
-      </div>
+      ${section("Timestamps", [
+      tile("add_circle", "Created", fmtDateTime(record.createdAt), false),
+      tile("update", "Last updated", fmtDateTime(record.updatedAt), false),
+    ])}
 
       <div class="spacer"></div>
       <div class="btn-row">
         <button class="btn btn-outlined" id="editBtn" type="button"><span class="material-symbols-outlined">edit</span>Edit</button>
         <button class="btn btn-outlined btn-danger" id="delBtn" type="button"><span class="material-symbols-outlined">delete</span>Delete</button>
-      </div>
-      <div class="center muted small" style="text-align:center;margin-top:12px;color:var(--on-surface-variant)">Synced: ${esc(record.syncStatus)}</div>`;
+      </div>`;
 
     openSheet({ header, body });
 
@@ -1302,12 +1799,33 @@
     window.addEventListener("keydown", (e) => {
       if (e.key === "Escape") closeSheet();
     });
+    window.addEventListener("hashchange", () => {
+      const hash = location.hash.replace(/^#/, "");
+      if (!S.authed) {
+        if (hash) {
+          try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { }
+        }
+        return;
+      }
+      if (["dashboard", "records", "settings"].includes(hash) && S.tab !== hash) {
+        S.tab = hash;
+        render();
+      }
+    });
   }
 
   function init() {
     S.themeMode = localStorage.getItem("rv_theme") || "system";
     applyTheme();
     wireGlobal();
+    S.authed = isAuthed();
+    startAuthTimer();
+    if (!S.authed) {
+      S.tab = "dashboard";
+      try { history.replaceState(null, "", location.pathname + location.search); } catch (e) { }
+      render();
+      return;
+    }
     const hash = location.hash.replace(/^#/, "");
     if (["dashboard", "records", "settings"].includes(hash)) S.tab = hash;
     render();
