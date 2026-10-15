@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Android build outputs
+android/build/
+android/app/build/
+android/.gradle/
+android/capacitor-cordova-android-plugins/build/
+android/capacitor-android/build/
+
+# Signing (never commit)
+android/key.properties
+*.jks
+*.keystore
