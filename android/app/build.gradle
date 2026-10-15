@@ -1,5 +1,11 @@
 apply plugin: 'com.android.application'
 
+def keyProps = new Properties()
+def keyFile = rootProject.file("key.properties")
+if (keyFile.exists()) {
+    keyProps.load(new FileInputStream(keyFile))
+}
+
 android {
     namespace = "com.singsys.recordvault"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,9 +22,20 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (keyFile.exists()) {
+                storeFile file(keyProps["storeFile"])
+                storePassword keyProps["storePassword"]
+                keyAlias keyProps["keyAlias"]
+                keyPassword keyProps["keyPassword"]
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
+            signingConfig signingConfigs.release
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
