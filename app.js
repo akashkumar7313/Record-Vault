@@ -8,7 +8,8 @@
   const WRITE_RETRIES = 2;
   const BACKOFF_MS = 600;
   const RECENT_LIMIT = 5;
-  const APP_VERSION = "1.0.0";
+  const PAGE_SIZE = 40;
+  const APP_VERSION = "2.0.0";
 
   const AUTH = {
     mobiles: ["9389885644", "9956513630"],
@@ -40,6 +41,7 @@
     online: navigator.onLine,
     demoMode: false,
     hasCache: false,
+    listLimit: PAGE_SIZE,
     authed: false,
     loginStep: "mobile",
     loginMobile: "",
@@ -283,19 +285,27 @@
   };
 
   const FIELDS = [
-    { key: "applicationNo", header: "Application No", label: "Application No", icon: "confirmation_number", type: "text", placeholder: "Optional", validator: Validators.applicationNo },
-    { key: "name", header: "Name", label: "Name", icon: "person", type: "text", placeholder: "Full name", validator: Validators.name },
-    { key: "guardianName", header: "Name / Father's or Husband's", label: "Name / Father's or Husband's", icon: "man", type: "text", placeholder: "Father's or husband's name", validator: Validators.guardianName },
-    { key: "relation", header: "Relation", label: "Relation", icon: "diversity_3", type: "text", placeholder: "Father / Husband", validator: Validators.relation },
-    { key: "gender", header: "Male / Female", label: "Male / Female", icon: "wc", type: "select", validator: Validators.gender },
-    { key: "aadhaarNumber", header: "Aadhaar Number", label: "Aadhaar Number", icon: "badge", type: "text", numeric: 12, placeholder: "12-digit number", validator: Validators.aadhaar },
-    { key: "address", header: "Address", label: "Address", icon: "location_on", type: "textarea", placeholder: "Full address", validator: Validators.address },
-    { key: "bankName", header: "Bank Name", label: "Bank Name", icon: "account_balance", type: "text", placeholder: "Bank name", validator: Validators.bankName },
-    { key: "accountNumber", header: "Account Number", label: "Account Number", icon: "numbers", type: "text", numeric: 18, placeholder: "Bank account number", validator: Validators.accountNumber },
-    { key: "ifscCode", header: "IFSC Code", label: "IFSC Code", icon: "pin", type: "text", uppercase: true, placeholder: "e.g. SBIN0001234", validator: Validators.ifsc },
-    { key: "addressCorrect", header: "Address Correct", label: "Address Correct", icon: "home_pin", type: "textarea", placeholder: "Corrected address (if any)", validator: Validators.addressCorrect },
-    { key: "mobileNumberCorrect", header: "Mobile Number Correct", label: "Mobile Number Correct", icon: "call", type: "text", numeric: 10, placeholder: "10-digit mobile number", validator: Validators.mobileNumberCorrect },
-    { key: "remarks", header: "Remarks", label: "Remarks", icon: "sticky_note_2", type: "textarea", placeholder: "Any remarks", validator: null },
+    { key: "applicationNo", header: "Application No", label: "Application No", icon: "confirmation_number", type: "text", placeholder: "Optional", group: "identity", validator: Validators.applicationNo },
+    { key: "name", header: "Name", label: "Name", icon: "person", type: "text", placeholder: "Full name", group: "identity", validator: Validators.name },
+    { key: "gender", header: "Male / Female", label: "Male / Female", icon: "wc", type: "select", group: "identity", validator: Validators.gender },
+    { key: "aadhaarNumber", header: "Aadhaar Number", label: "Aadhaar Number", icon: "badge", type: "text", numeric: 12, placeholder: "12-digit number", group: "identity", validator: Validators.aadhaar },
+    { key: "guardianName", header: "Name / Father's or Husband's", label: "Name / Father's or Husband's", icon: "man", type: "text", placeholder: "Father's or husband's name", group: "family", row: true, validator: Validators.guardianName },
+    { key: "relation", header: "Relation", label: "Relation", icon: "diversity_3", type: "text", placeholder: "Father / Husband", group: "family", row: true, validator: Validators.relation },
+    { key: "address", header: "Address", label: "Address", icon: "location_on", type: "textarea", placeholder: "Full address", group: "address", validator: Validators.address },
+    { key: "addressCorrect", header: "Address Correct", label: "Address Correct", icon: "home_pin", type: "textarea", placeholder: "Corrected address (if any)", group: "address", validator: Validators.addressCorrect },
+    { key: "bankName", header: "Bank Name", label: "Bank Name", icon: "account_balance", type: "text", placeholder: "Bank name", group: "bank", row: true, validator: Validators.bankName },
+    { key: "accountNumber", header: "Account Number", label: "Account Number", icon: "numbers", type: "text", numeric: 18, placeholder: "Bank account number", group: "bank", row: true, validator: Validators.accountNumber },
+    { key: "ifscCode", header: "IFSC Code", label: "IFSC Code", icon: "pin", type: "text", uppercase: true, placeholder: "e.g. SBIN0001234", group: "bank", validator: Validators.ifsc },
+    { key: "mobileNumberCorrect", header: "Mobile Number Correct", label: "Mobile Number Correct", icon: "call", type: "text", numeric: 10, placeholder: "10-digit mobile number", group: "contact", validator: Validators.mobileNumberCorrect },
+    { key: "remarks", header: "Remarks", label: "Remarks", icon: "sticky_note_2", type: "textarea", placeholder: "Any remarks", group: "contact", validator: null },
+  ];
+
+  const FORM_SECTIONS = [
+    { id: "identity", title: "Identity", hint: "Basic details of the person" },
+    { id: "family", title: "Family", hint: "Father's or husband's details" },
+    { id: "address", title: "Address", hint: "Current and corrected address" },
+    { id: "bank", title: "Bank details", hint: "Account linked with the record" },
+    { id: "contact", title: "Contact & remarks", hint: "Optional follow-up details" },
   ];
 
   function demoRecord(base) {
@@ -310,10 +320,6 @@
       address: "",
       bankName: "",
       accountNumber: "",
-      ifscCode: "",
-      addressCorrect: "",
-      mobileNumberCorrect: "",
-      remarks: "",
       ...rest,
       createdAt,
       updatedAt,
@@ -566,7 +572,7 @@
   function interpretWrite(decoded, expectedAadhaar) {
     if (Array.isArray(decoded)) {
       return decoded.length
-        ? { confirmed: true, message: "Confirmed by server" }
+        ? { confirmed: true, message: "Confirmed by sesrver" }
         : { confirmed: false, message: "Server returned no confirmation for this change." };
     }
     if (decoded && typeof decoded === "object") {
@@ -634,29 +640,24 @@
   function recordRowHtml(record, index, withMenu) {
     const relation = String(record.relation || "").trim();
     const guardian = String(record.guardianName || "").trim();
-    const guardianText = [relation, guardian].filter(Boolean).join(" ") || "\u2014";
+    const guardianText = [relation, guardian].filter(Boolean).join(" \u00b7 ") || "\u2014";
+    const statusLabel = (SYNC[record.syncStatus] || SYNC.synced).label;
     const delay = index < 15 ? ` style="animation-delay:${index * 45}ms"` : ` style="animation:none"`;
     return `
       <div class="record-row" data-open="${esc(record.aadhaarNumber)}" role="button" tabindex="0"${delay}>
         ${avatarHtml(record, 23)}
         <div class="info">
           <div class="name">${esc(record.name || "Unnamed record")}</div>
-
-<div class="guardian">
-  <span class="v">${esc(relation ? relation.toUpperCase() : "—")} - ${esc(guardian || "—")}</span>
-</div>
-          
-<div class="facts">
-  <span class="fact mono">
-    <span class="material-symbols-outlined">badge</span>
-    <span>Aadhaar No.:</span>
-    ${esc(String(record.aadhaarNumber || "").replace(/\D/g, "").replace(/(\d{4})(?=\d)/g, "$1 "))}
-  </span>
-</div>
-
+          <div class="guardian"><span class="v">${esc(guardianText)}</span></div>
+          <div class="facts">
+            <span class="fact mono">
+              <span class="material-symbols-outlined">badge</span>
+              ${esc(String(record.aadhaarNumber || "").replace(/\D/g, "").replace(/(\d{4})(?=\d)/g, "$1 "))}
+            </span>
+          </div>
         </div>
         <div class="trail">
-          ${statusChip(record.syncStatus, true)}
+          <span class="status-dot" data-status="${esc(record.syncStatus)}" title="${esc(statusLabel)}" aria-label="${esc(statusLabel)}"></span>
           ${withMenu
         ? `<button class="icon-btn" data-menu="${esc(record.aadhaarNumber)}" type="button" aria-label="More actions"><span class="material-symbols-outlined">more_vert</span></button>`
         : `<span class="material-symbols-outlined chev">chevron_right</span>`}
@@ -712,6 +713,7 @@
     const host = el("snackbarHost");
     const node = document.createElement("div");
     node.className = "snackbar";
+    node.style.setProperty("--snack-ms", `${ms || 3000}ms`);
     node.textContent = message;
     host.appendChild(node);
     setTimeout(() => {
@@ -719,6 +721,26 @@
       node.style.opacity = "0";
       setTimeout(() => node.remove(), 200);
     }, ms || 3000);
+  }
+
+  function animateCount(node, target, ms) {
+    const dur = ms || 750;
+    const start = performance.now();
+    const step = (t) => {
+      const p = Math.min(1, (t - start) / dur);
+      const eased = 1 - Math.pow(1 - p, 3);
+      node.textContent = String(Math.round(target * eased));
+      if (p < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+  }
+
+  function animateRings(root) {
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      root.querySelectorAll(".ring-progress[data-dash]").forEach((c) => {
+        c.setAttribute("stroke-dasharray", `${c.dataset.dash} ${c.dataset.circ}`);
+      });
+    }));
   }
 
   const media = window.matchMedia("(prefers-color-scheme: dark)");
@@ -738,11 +760,12 @@
   }
 
   /* ---- Sheets / modal ---- */
-  function openSheet(innerHtml, kind) {
+  function openSheet(innerHtml, kind, extraClass) {
     const host = el("sheetHost");
     host.innerHTML = `<div class="scrim" data-close></div>${kind === "dialog" ? `<div class="dialog">${innerHtml}</div>` : `<div class="sheet"><div class="sheet-header"></div><div class="sheet-body"></div></div>`}`;
     if (kind !== "dialog") {
       const sheet = host.querySelector(".sheet");
+      if (extraClass) sheet.classList.add(extraClass);
       sheet.querySelector(".sheet-header").innerHTML = innerHtml.header || "";
       sheet.querySelector(".sheet-body").innerHTML = innerHtml.body || "";
     }
@@ -783,6 +806,7 @@
     const bar = el("appbar");
     if (S.tab === "dashboard") {
       bar.innerHTML = `
+        <span class="brand-mark" aria-hidden="true">RV</span>
         <div class="title">
           <h1>${esc(greeting())}</h1>
           <span class="sub">${esc(fmtDate(new Date()))}</span>
@@ -794,10 +818,13 @@
     } else if (S.tab === "records") {
       const st = stats();
       bar.innerHTML = `
-        <div class="title"><h1>Records</h1></div>
+        <span class="brand-mark" aria-hidden="true">RV</span>
+        <div class="title"><h1>Records</h1><span class="sub">${st.total} total</span></div>
         ${st.pending > 0 ? statusChip("pending", true) : ""}`;
     } else {
-      bar.innerHTML = `<div class="title"><h1>Settings</h1></div>`;
+      bar.innerHTML = `
+        <span class="brand-mark" aria-hidden="true">RV</span>
+        <div class="title"><h1>Settings</h1><span class="sub">Sync, export &amp; preferences</span></div>`;
     }
   }
 
@@ -814,6 +841,7 @@
     if (!S.authed) return;
     if (S.tab === tab) return;
     S.tab = tab;
+    S.listLimit = PAGE_SIZE;
     try { history.replaceState(null, "", "#" + tab); } catch (e) { }
     render();
     window.scrollTo({ top: 0 });
@@ -995,6 +1023,13 @@
     if (S.tab === "dashboard") renderDashboard(content);
     else if (S.tab === "records") renderRecords(content);
     else renderSettings(content);
+
+    animateRings(content);
+    content.querySelectorAll("[data-count]").forEach((n) => {
+      const target = parseInt(n.dataset.count, 10) || 0;
+      n.textContent = "0";
+      animateCount(n, target, 750);
+    });
   }
 
   function renderDashboard(c) {
@@ -1033,50 +1068,58 @@
 
     c.innerHTML = `
       ${demoBannerHtml()}
-      ${S.online === false ? `<div class="card" style="padding:12px 16px;margin-bottom:12px;background:var(--secondary-container);color:var(--on-secondary-container);border:none">Offline \u2014 changes will be saved when you reconnect.</div>` : ""}
-      <div class="card hero" style="padding:16px">
-        <div class="summary-head">
-          <div class="ring">
-            <svg width="68" height="68" viewBox="0 0 68 68">
-              <circle cx="34" cy="34" r="30" fill="none" stroke="color-mix(in srgb, ${accent} 18%, transparent)" stroke-width="6"></circle>
-              <circle cx="34" cy="34" r="30" fill="none" stroke="${accent}" stroke-width="6" stroke-linecap="round"
-                stroke-dasharray="${dash} ${circumference}" ></circle>
-            </svg>
-            <div class="ring-text">${st.total === 0 ? "\u2014" : `${Math.round(value * 100)}%`}</div>
+      ${S.online === false ? `<div class="offline-banner"><span class="material-symbols-outlined">cloud_off</span>Offline \u2014 changes will sync when you reconnect.</div>` : ""}
+      <div class="dash-grid">
+        <div class="dash-col">
+          <div class="card hero" style="padding:18px">
+            <div class="summary-head">
+              <div class="ring">
+                <svg width="72" height="72" viewBox="0 0 68 68">
+                  <circle cx="34" cy="34" r="30" fill="none" stroke="color-mix(in srgb, ${accent} 18%, transparent)" stroke-width="6"></circle>
+                  <circle class="ring-progress" data-dash="${st.total === 0 ? 0 : dash}" data-circ="${circumference}"
+                    cx="34" cy="34" r="30" fill="none" stroke="${accent}" stroke-width="6" stroke-linecap="round"
+                    stroke-dasharray="0 ${circumference}"></circle>
+                </svg>
+                <div class="ring-text">${st.total === 0 ? "\u2014" : `${Math.round(value * 100)}%`}</div>
+              </div>
+              <div style="flex:1;min-width:0">
+                <div class="headline">${esc(headline)}</div>
+                <div class="subline">${esc(subline)}</div>
+              </div>
+            </div>
+            <div class="stat-tiles">
+              <div class="stat-tile"><div class="v" data-count="${st.total}">${st.total}</div><div class="k"><span class="material-symbols-outlined">people</span>Total</div></div>
+              <div class="stat-tile"><div class="v" data-count="${st.synced}" style="color:var(--synced)">${st.synced}</div><div class="k"><span class="material-symbols-outlined">cloud_done</span>Synced</div></div>
+              <div class="stat-tile"><div class="v" data-count="${st.pending}" style="color:var(--pending)">${st.pending}</div><div class="k"><span class="material-symbols-outlined">cloud_upload</span>Pending</div></div>
+            </div>
+            <div class="spacer"></div>
+            <button class="btn btn-tonal btn-block" id="summarySync" type="button">
+              <span class="material-symbols-outlined">sync</span>Sync now
+            </button>
           </div>
-          <div style="flex:1;min-width:0">
-            <div class="headline">${esc(headline)}</div>
-            <div class="subline">${esc(subline)}</div>
+
+          <div class="section-title"><div><h2>Find a record</h2><p>Search by name, father/husband name, mobile or Aadhaar</p></div></div>
+          <div class="search">
+            <span class="material-symbols-outlined">search</span>
+            <input id="dashSearch" type="search" placeholder="Search name, mobile or Aadhaar" value="${esc(S.query)}" autocomplete="off">
+            <button class="icon-btn search-clear" id="dashClear" type="button" aria-label="Clear search" ${S.query.trim() ? "" : "hidden"}><span class="material-symbols-outlined">close</span></button>
+          </div>
+          <p class="search-hint"><span class="material-symbols-outlined">bolt</span>Enter a full 12-digit Aadhaar number to open that record instantly.</p>
+          <div id="dashResults" class="dash-results"></div>
+          <div id="openResultsWrap" ${S.query.trim() ? "" : "hidden"}><button class="text-link" id="openResults" type="button"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">arrow_forward</span> See all results in Records</button></div>
+
+          <div class="section-title"><h2>Quick actions</h2></div>
+          <div class="card quick">
+            <button data-quick="add" type="button"><span class="badge"><span class="material-symbols-outlined">person_add</span></span><span class="label">Add record</span></button>
+            <button data-quick="browse" type="button"><span class="badge"><span class="material-symbols-outlined">folder_copy</span></span><span class="label">Browse</span></button>
+            <button data-quick="settings" type="button"><span class="badge"><span class="material-symbols-outlined">tune</span></span><span class="label">Settings</span></button>
           </div>
         </div>
-        <div class="chips">
-          <span class="chip" style="background:color-mix(in srgb,var(--on-surface-variant) 10%,transparent);color:var(--on-surface-variant)"><span class="material-symbols-outlined">people</span>${st.total} total</span>
-          <span class="chip" style="background:color-mix(in srgb,var(--synced) 12%,transparent);color:var(--synced)"><span class="material-symbols-outlined">cloud_done</span>${st.synced} synced</span>
-          <span class="chip" style="background:color-mix(in srgb,var(--pending) 12%,transparent);color:var(--pending)"><span class="material-symbols-outlined">cloud_upload</span>${st.pending} pending</span>
+
+        <div class="dash-col">
+          <div class="section-title"><h2>Recent records</h2><button class="text-link" id="seeAll" type="button">See all</button></div>
+          ${recentHtml}
         </div>
-        <div class="spacer"></div>
-        <button class="btn btn-tonal btn-block" id="summarySync" type="button">
-          <span class="material-symbols-outlined">sync</span>Sync now
-        </button>
-      </div>
-
-      <div class="section-title"><div><h2>Find a record</h2><p>Search by name, father/husband name, mobile or Aadhaar</p></div></div>
-      <div class="search">
-        <span class="material-symbols-outlined">search</span>
-        <input id="dashSearch" type="search" placeholder="Search name, father/husband name, mobile or Aadhaar" value="${esc(S.query)}" autocomplete="off">
-        ${S.query.trim() ? `<button class="icon-btn search-clear" id="dashClear" type="button" aria-label="Clear search"><span class="material-symbols-outlined">close</span></button>` : ""}
-      </div>
-      <p class="search-hint"><span class="material-symbols-outlined">bolt</span>Enter a full 12-digit Aadhaar number to open that record instantly.</p>
-      ${S.query.trim() ? `<div style="margin-top:8px"><button class="text-link" id="openResults" type="button"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">arrow_forward</span> Open search results in Records</button></div>` : ""}
-
-      <div class="section-title"><h2>Recent records</h2><button class="text-link" id="seeAll" type="button">See all</button></div>
-      ${recentHtml}
-
-      <div class="section-title"><h2>Quick actions</h2></div>
-      <div class="card quick">
-        <button data-quick="add" type="button"><span class="badge"><span class="material-symbols-outlined">person_add</span></span><span class="label">Add record</span></button>
-        <button data-quick="browse" type="button"><span class="badge"><span class="material-symbols-outlined">folder_copy</span></span><span class="label">Browse</span></button>
-        <button data-quick="settings" type="button"><span class="badge"><span class="material-symbols-outlined">tune</span></span><span class="label">Settings</span></button>
       </div>`;
 
     el("summarySync").addEventListener("click", () => syncNow(false));
@@ -1091,16 +1134,42 @@
       return true;
     };
     const dashSearch = el("dashSearch");
+    const DASH_RESULTS_CAP = 12;
+    const updateDashResults = () => {
+      const has = !!S.query.trim();
+      const clear = el("dashClear");
+      if (clear) clear.hidden = !has;
+      const wrap = el("openResultsWrap");
+      const box = el("dashResults");
+      if (!box) return;
+      if (!has) {
+        box.innerHTML = "";
+        if (wrap) wrap.hidden = true;
+        return;
+      }
+      const list = filteredRecords().sort((a, b) => b.updatedAt - a.updatedAt);
+      const shown = list.slice(0, DASH_RESULTS_CAP);
+      if (!list.length) {
+        box.innerHTML = `<div class="card dash-results-empty">
+          <span class="material-symbols-outlined">${isFullAadhaar(S.query) ? "badge" : "person_search"}</span>
+          <div><strong>${isFullAadhaar(S.query) ? "No record for this Aadhaar" : "No matching records"}</strong>
+          <p>Try a different name, Aadhaar, account or mobile number.</p></div>
+        </div>`;
+      } else {
+        box.innerHTML = `<div class="dash-results-head"><span class="material-symbols-outlined">search</span>${list.length} result${list.length === 1 ? "" : "s"} for &ldquo;${esc(S.query.trim())}&rdquo;</div>
+          ${recordListHtml(shown, false)}
+          ${list.length > shown.length ? `<button class="text-link" id="dashShowAll" type="button"><span class="material-symbols-outlined" style="font-size:16px;vertical-align:-3px">arrow_forward</span> Show all ${list.length} results in Records</button>` : ""}`;
+      }
+      if (wrap) wrap.hidden = false;
+      box.querySelectorAll("[data-open]").forEach((n) => n.addEventListener("click", () => openDetails(n.dataset.open)));
+      const showAll = el("dashShowAll");
+      if (showAll) showAll.addEventListener("click", () => setTab("records"));
+    };
+    updateDashResults();
     dashSearch.addEventListener("input", () => {
       S.query = dashSearch.value;
       if (openMatch(dashSearch.value)) return;
-      const pos = dashSearch.selectionStart;
-      renderDashboard(c);
-      const next = el("dashSearch");
-      if (next) {
-        next.focus();
-        try { next.setSelectionRange(pos, pos); } catch (e) { }
-      }
+      updateDashResults();
     });
     dashSearch.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
@@ -1111,9 +1180,9 @@
     const dashClear = el("dashClear");
     if (dashClear) dashClear.addEventListener("click", () => {
       S.query = "";
-      renderDashboard(c);
-      const next = el("dashSearch");
-      if (next) next.focus();
+      dashSearch.value = "";
+      updateDashResults();
+      dashSearch.focus();
     });
     const openResults = el("openResults");
     if (openResults) openResults.addEventListener("click", () => setTab("records"));
@@ -1130,13 +1199,11 @@
     wireDemoBanner(c);
   }
 
-  function renderRecords(c) {
-    const st = stats();
+  function buildRecListHtml() {
     const list = filteredRecords().sort((a, b) => b.updatedAt - a.updatedAt);
     const fullAadhaar = isFullAadhaar(S.query);
-    let listHtml;
     if (!S.records.length) {
-      listHtml = `<div class="empty">
+      return `<div class="empty">
         <span class="material-symbols-outlined">person_search</span>
         <h3>No records yet</h3>
         <p>Add your first record, or take a quick look at how RecordVault works with sample data.</p>
@@ -1145,16 +1212,74 @@
           <button class="btn btn-outlined" data-demo type="button"><span class="material-symbols-outlined">experiment</span>Sample data</button>
         </div>
       </div>`;
-    } else if (!list.length) {
-      listHtml = `<div class="empty">
+    }
+    if (!list.length) {
+      return `<div class="empty">
         <span class="material-symbols-outlined">${fullAadhaar ? "badge" : "person_search"}</span>
         <h3>${fullAadhaar ? "No record for this Aadhaar" : "No matching records"}</h3>
         <p>${fullAadhaar ? `Nothing found for ${esc(maskAadhaar(S.query))}. Check the number and try again.` : "Try a different name, Aadhaar, account or mobile number."}</p>
       </div>`;
-    } else {
-      listHtml = recordListHtml(list, true);
     }
+    const shown = list.slice(0, S.listLimit);
+    let html = recordListHtml(shown, true);
+    const remaining = list.length - shown.length;
+    if (remaining > 0) {
+      html += `<div class="list-foot" id="listFoot">
+        <span class="list-foot-status"><span class="spinner"></span>Loading more\u2026</span>
+        <button class="btn btn-outlined btn-block load-more" id="loadMore" type="button">
+          <span class="material-symbols-outlined">expand_more</span>Load more (${remaining} remaining)</button>
+      </div>`;
+    } else {
+      html += `<div class="list-end"><span class="material-symbols-outlined">task_alt</span>All ${list.length} records loaded</div>`;
+    }
+    return html;
+  }
 
+  let listObserver = null;
+  function autoLoadOnScroll() {
+    if (listObserver) listObserver.disconnect();
+    const foot = el("listFoot");
+    if (!foot || typeof IntersectionObserver === "undefined") return;
+    listObserver = new IntersectionObserver((entries) => {
+      if (!entries.some((e) => e.isIntersecting)) return;
+      const list = filteredRecords();
+      if (S.listLimit >= list.length) return;
+      S.listLimit += PAGE_SIZE;
+      updateRecList();
+    }, { root: null, rootMargin: "900px 0px", threshold: 0 });
+    listObserver.observe(foot);
+  }
+
+  function wireRecList(root) {
+    const loadMore = el("loadMore");
+    if (loadMore) loadMore.addEventListener("click", () => {
+      S.listLimit += PAGE_SIZE;
+      updateRecList();
+    });
+    autoLoadOnScroll();
+    const emptyAdd = el("emptyAdd");
+    if (emptyAdd) emptyAdd.addEventListener("click", () => openForm(null));
+    root.querySelectorAll("[data-open]").forEach((n) => {
+      n.addEventListener("click", () => openDetails(n.dataset.open));
+      n.addEventListener("keydown", (e) => {
+        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetails(n.dataset.open); }
+      });
+    });
+    root.querySelectorAll("[data-menu]").forEach((n) => n.addEventListener("click", (e) => openRowMenu(e, n.dataset.menu)));
+    wireDemoBanner(root);
+  }
+
+  function updateRecList() {
+    const box = el("recList");
+    if (!box) return;
+    box.innerHTML = buildRecListHtml();
+    wireRecList(box);
+    const clear = el("recClear");
+    if (clear) clear.hidden = !S.query.trim();
+  }
+
+  function renderRecords(c) {
+    const st = stats();
     c.innerHTML = `
       ${demoBannerHtml()}
       <div class="section-title" style="margin-top:4px">
@@ -1163,32 +1288,29 @@
       </div>
       <div class="search">
         <span class="material-symbols-outlined">search</span>
-        <input id="recSearch" type="search" placeholder="Search name, father/husband name, mobile or Aadhaar" value="${esc(S.query)}" autocomplete="off">
-        ${S.query.trim() ? `<button class="icon-btn search-clear" id="recClear" type="button" aria-label="Clear search"><span class="material-symbols-outlined">close</span></button>` : ""}
+        <input id="recSearch" type="search" placeholder="Search name, mobile or Aadhaar" value="${esc(S.query)}" autocomplete="off">
+        <button class="icon-btn search-clear" id="recClear" type="button" aria-label="Clear search" ${S.query.trim() ? "" : "hidden"}><span class="material-symbols-outlined">close</span></button>
       </div>
       <p class="search-hint"><span class="material-symbols-outlined">bolt</span>Enter a full 12-digit Aadhaar number to open that record instantly.</p>
-      <div id="recList">${listHtml}</div>`;
+      <div id="recList"></div>`;
 
+    updateRecList();
+
+    const search = el("recSearch");
     const openMatch = (value) => {
       const match = exactAadhaarMatch(value);
       if (!match) return false;
       S.query = "";
+      search.value = "";
       openDetails(match.aadhaarNumber);
-      renderRecords(c);
+      updateRecList();
       return true;
     };
-
-    const search = el("recSearch");
     search.addEventListener("input", () => {
       S.query = search.value;
+      S.listLimit = PAGE_SIZE;
       if (openMatch(search.value)) return;
-      const pos = search.selectionStart;
-      renderRecords(c);
-      const next = el("recSearch");
-      if (next) {
-        next.focus();
-        try { next.setSelectionRange(pos, pos); } catch (e) { }
-      }
+      updateRecList();
     });
     search.addEventListener("keydown", (e) => {
       if (e.key === "Enter" && openMatch(search.value)) e.preventDefault();
@@ -1196,36 +1318,32 @@
     const clearBtn = el("recClear");
     if (clearBtn) clearBtn.addEventListener("click", () => {
       S.query = "";
-      renderRecords(c);
-      const next = el("recSearch");
-      if (next) next.focus();
+      search.value = "";
+      S.listLimit = PAGE_SIZE;
+      updateRecList();
+      search.focus();
     });
-    const emptyAdd = el("emptyAdd");
-    if (emptyAdd) emptyAdd.addEventListener("click", () => openForm(null));
-    c.querySelectorAll("[data-open]").forEach((n) => {
-      n.addEventListener("click", () => openDetails(n.dataset.open));
-      n.addEventListener("keydown", (e) => {
-        if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDetails(n.dataset.open); }
-      });
-    });
-    c.querySelectorAll("[data-menu]").forEach((n) => n.addEventListener("click", (e) => openRowMenu(e, n.dataset.menu)));
-    wireDemoBanner(c);
+    const exit = el("exitDemo");
+    if (exit) exit.addEventListener("click", exitDemoMode);
   }
 
   function openRowMenu(event, aadhaar) {
     event.stopPropagation();
     const target = event.currentTarget;
-    const existing = target.parentNode.querySelector(".row-menu");
+    const existing = document.querySelector(".row-menu");
     if (existing) { existing.remove(); return; }
     const menu = document.createElement("div");
     menu.className = "row-menu";
-    menu.style.cssText = "position:absolute;background:var(--surface);border:1px solid var(--outline-variant);border-radius:12px;box-shadow:var(--shadow);padding:4px;z-index:30";
     const r = target.getBoundingClientRect();
-    menu.style.top = `${r.bottom + window.scrollY + 4}px`;
-    menu.style.left = `${Math.max(8, r.right - 160 + window.scrollX)}px`;
+    const menuW = 172;
+    const menuH = 96;
+    const left = Math.max(8, Math.min(r.right - menuW, window.innerWidth - menuW - 8));
+    const top = r.bottom + menuH + 8 > window.innerHeight ? r.top - menuH - 4 : r.bottom + 4;
+    menu.style.top = `${Math.max(8, top)}px`;
+    menu.style.left = `${left}px`;
     menu.innerHTML = `
-      <button class="text-link" data-menu-act="edit" style="display:flex;gap:10px;align-items:center;color:var(--on-surface);width:100%;justify-content:flex-start"><span class="material-symbols-outlined" style="font-size:18px">edit</span>Edit</button>
-      <button class="text-link" data-menu-act="delete" style="display:flex;gap:10px;align-items:center;color:var(--error);width:100%;justify-content:flex-start"><span class="material-symbols-outlined" style="font-size:18px">delete</span>Delete</button>`;
+      <button data-menu-act="edit"><span class="material-symbols-outlined">edit</span>Edit</button>
+      <button class="danger" data-menu-act="delete"><span class="material-symbols-outlined">delete</span>Delete</button>`;
     document.body.appendChild(menu);
     const cleanup = (ev) => { if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener("click", cleanup); } };
     setTimeout(() => document.addEventListener("click", cleanup), 0);
@@ -1244,13 +1362,14 @@
     const st = stats();
     c.innerHTML = `
       ${demoBannerHtml()}
-      <div class="card hero" style="padding:16px">
+      <div class="card hero" style="padding:18px">
         <div class="summary-head">
           <div class="ring">
-            <svg width="68" height="68" viewBox="0 0 68 68">
+            <svg width="72" height="72" viewBox="0 0 68 68">
               <circle cx="34" cy="34" r="30" fill="none" stroke="color-mix(in srgb,var(--synced) 18%,transparent)" stroke-width="6"></circle>
-              <circle cx="34" cy="34" r="30" fill="none" stroke="var(--synced)" stroke-width="6" stroke-linecap="round"
-                stroke-dasharray="${2 * Math.PI * 30} ${2 * Math.PI * 30}"></circle>
+              <circle class="ring-progress" data-dash="${2 * Math.PI * 30}" data-circ="${2 * Math.PI * 30}"
+                cx="34" cy="34" r="30" fill="none" stroke="var(--synced)" stroke-width="6" stroke-linecap="round"
+                stroke-dasharray="0 ${2 * Math.PI * 30}"></circle>
             </svg>
             <div class="ring-text">${st.total === 0 ? "\u2014" : "100%"}</div>
           </div>
@@ -1263,47 +1382,53 @@
         <button class="btn btn-tonal btn-block" id="settingsSync" type="button"><span class="material-symbols-outlined">sync</span>Sync now</button>
       </div>
 
-      <div class="section-label">Google Sheets connection</div>
-      <div class="card" style="padding:16px">
-        <div style="display:flex;align-items:center;gap:8px">
-          <span class="material-symbols-outlined" id="connIcon" style="color:var(--on-surface-variant)">sync</span>
-          <span id="connText" style="flex:1;font-size:14px;font-weight:500">Checking connection\u2026</span>
-          <button class="text-link" id="testBtn" type="button">Test</button>
+      <div class="settings-grid">
+        <div class="settings-col">
+          <div class="section-label">Google Sheets connection</div>
+          <div class="card" style="padding:16px">
+            <div class="conn-line">
+              <span class="material-symbols-outlined" id="connIcon" style="color:var(--on-surface-variant)">sync</span>
+              <span class="conn-text" id="connText">Checking connection\u2026</span>
+              <button class="text-link" id="testBtn" type="button">Test</button>
+            </div>
+            <div class="muted small" style="margin-top:8px">Endpoint: ${esc(new URL(endpoint()).host)}</div>
+            <div class="muted small" style="margin-top:2px">${hasCustomEndpoint() ? "A custom endpoint is configured." : "Using the default shared endpoint. Treat it as untrusted."}</div>
+          </div>
+
+          <div class="section-label">Export records</div>
+          <div class="card" style="padding:16px">
+            <div>${st.total} record${st.total === 1 ? "" : "s"} will be exported.</div>
+            <div class="muted small" style="margin-top:8px">Creates an .xlsx workbook containing every supported field.</div>
+            <div class="spacer"></div>
+            <div class="btn-row">
+              <button class="btn btn-filled" id="shareBtn" type="button"><span class="material-symbols-outlined">ios_share</span>Share</button>
+              <button class="btn btn-outlined" id="saveBtn" type="button"><span class="material-symbols-outlined">save</span>Save file</button>
+            </div>
+          </div>
         </div>
-        <div class="muted small" style="margin-top:8px">Endpoint: ${esc(new URL(endpoint()).host)}</div>
-        <div class="muted small" style="margin-top:2px">${hasCustomEndpoint() ? "A custom endpoint is configured." : "Using the default shared endpoint. Treat it as untrusted."}</div>
-      </div>
 
-      <div class="section-label">Export records</div>
-      <div class="card" style="padding:16px">
-        <div>${st.total} record${st.total === 1 ? "" : "s"} will be exported.</div>
-        <div class="muted small" style="margin-top:8px">Creates an .xlsx workbook containing every supported field.</div>
-        <div class="spacer"></div>
-        <div class="btn-row">
-          <button class="btn btn-filled" id="shareBtn" type="button"><span class="material-symbols-outlined">ios_share</span>Share</button>
-          <button class="btn btn-outlined" id="saveBtn" type="button"><span class="material-symbols-outlined">save</span>Save file</button>
+        <div class="settings-col">
+          <div class="section-label">Appearance</div>
+          <div class="segmented" id="themeSeg">
+            <button data-mode="system" class="${S.themeMode === "system" ? "active" : ""}" type="button"><span class="material-symbols-outlined">brightness_auto</span>System</button>
+            <button data-mode="light" class="${S.themeMode === "light" ? "active" : ""}" type="button"><span class="material-symbols-outlined">light_mode</span>Light</button>
+            <button data-mode="dark" class="${S.themeMode === "dark" ? "active" : ""}" type="button"><span class="material-symbols-outlined">dark_mode</span>Dark</button>
+          </div>
+
+          <div class="section-label">Privacy</div>
+          <div class="card setting-row" id="privacyRow" style="cursor:pointer" role="button" tabindex="0">
+            <span class="tile-ic"><span class="material-symbols-outlined">shield</span></span>
+            <div class="body"><div class="label">Privacy &amp; security</div><div class="desc">How your data is stored, synced and protected.</div></div>
+            <span class="material-symbols-outlined chev">chevron_right</span>
+          </div>
+
+          <div class="section-label">Account</div>
+          <div class="card setting-row" id="signOutRow" style="cursor:pointer" role="button" tabindex="0">
+            <span class="tile-ic danger"><span class="material-symbols-outlined">logout</span></span>
+            <div class="body"><div class="label">Sign out</div><div class="desc">You will need to sign in again with OTP.</div></div>
+            <span class="material-symbols-outlined chev">chevron_right</span>
+          </div>
         </div>
-      </div>
-
-      <div class="section-label">Appearance</div>
-      <div class="segmented" id="themeSeg">
-        <button data-mode="system" class="${S.themeMode === "system" ? "active" : ""}" type="button"><span class="material-symbols-outlined">brightness_auto</span>System</button>
-        <button data-mode="light" class="${S.themeMode === "light" ? "active" : ""}" type="button"><span class="material-symbols-outlined">light_mode</span>Light</button>
-        <button data-mode="dark" class="${S.themeMode === "dark" ? "active" : ""}" type="button"><span class="material-symbols-outlined">dark_mode</span>Dark</button>
-      </div>
-
-      <div class="section-label">Privacy</div>
-      <div class="card setting-row" id="privacyRow" style="cursor:pointer">
-        <span class="material-symbols-outlined" style="color:var(--primary)">shield</span>
-        <div class="body"><div class="label">Privacy &amp; security</div><div class="desc">How your data is stored, synced and protected.</div></div>
-        <span class="material-symbols-outlined">chevron_right</span>
-      </div>
-
-      <div class="section-label">Account</div>
-      <div class="card setting-row" id="signOutRow" style="cursor:pointer">
-        <span class="material-symbols-outlined" style="color:var(--error)">logout</span>
-        <div class="body"><div class="label">Sign out</div><div class="desc">You will need to sign in again with OTP.</div></div>
-        <span class="material-symbols-outlined">chevron_right</span>
       </div>
 
       <div class="center muted small" style="text-align:center;margin-top:32px;color:var(--on-surface-variant)">RecordVault ${APP_VERSION}</div>`;
@@ -1525,14 +1650,45 @@
       </div>`;
     };
 
-    const body = `${FIELDS.map(fieldHtml).join("")}
-      <div class="spacer"></div>
-      <button class="btn btn-filled btn-block" id="saveBtn" type="button">
-        <span class="material-symbols-outlined">save</span>${isEdit ? "Save changes" : "Save record"}
-      </button>
-      <p class="muted small" style="text-align:center;margin-top:12px">Records are saved to your connected Google Sheet.</p>`;
+    const bodyBase = (() => {
+      let html = "";
+      let lastGroup = null;
+      let i = 0;
+      let secIndex = 0;
+      while (i < FIELDS.length) {
+        const f = FIELDS[i];
+        if (f.group !== lastGroup) {
+          lastGroup = f.group;
+          secIndex += 1;
+          const sec = FORM_SECTIONS.find((s) => s.id === f.group);
+          if (sec) {
+            html += `<div class="form-section">
+              <span class="num">${secIndex}</span>
+              <div><h3>${esc(sec.title)}</h3>${sec.hint ? `<div class="hint">${esc(sec.hint)}</div>` : ""}</div>
+            </div>`;
+          }
+        }
+        const next = FIELDS[i + 1];
+        if (f.row && next && next.row && next.group === f.group) {
+          html += `<div class="field-row">${fieldHtml(f)}${fieldHtml(next)}</div>`;
+          i += 2;
+        } else {
+          html += fieldHtml(f);
+          i += 1;
+        }
+      }
+      return html;
+    })();
 
-    openSheet({ header, body });
+    const body = `${bodyBase}
+      <div class="form-foot">
+        <button class="btn btn-filled btn-block" id="saveBtn" type="button">
+          <span class="material-symbols-outlined">save</span>${isEdit ? "Save changes" : "Save record"}
+        </button>
+        <p class="muted small note">Records are saved to your connected Google Sheet.</p>
+      </div>`;
+
+    openSheet({ header, body }, "sheet", "sheet-form");
 
     const host = el("sheetHost");
 
@@ -1672,7 +1828,7 @@
       ${section("Identity", [
       tile("confirmation_number", "Application No", record.applicationNo, true),
       tile("person", "Name", record.name, true),
-        tile("man", "Name / Father's or Husband's", guardianLine, false),
+      tile("man", "Name / Father's or Husband's", guardianLine, false),
       tile("wc", "Male / Female", genderLabel(record.gender), false),
       tile("badge", "Aadhaar number", record.aadhaarNumber, true),
     ])}
@@ -1791,6 +1947,19 @@
   function wireGlobal() {
     document.querySelectorAll(".nav-item").forEach((n) => n.addEventListener("click", () => setTab(n.dataset.tab)));
     el("fab").addEventListener("click", () => openForm(null));
+    document.addEventListener("click", (e) => {
+      const host = e.target.closest(".btn, .nav-item, .quick button, .icon-btn, .segmented button");
+      if (!host || host.disabled) return;
+      const r = host.getBoundingClientRect();
+      const size = Math.max(r.width, r.height);
+      const ripple = document.createElement("span");
+      ripple.className = "ripple";
+      ripple.style.width = ripple.style.height = `${size}px`;
+      ripple.style.left = `${e.clientX - r.left - size / 2}px`;
+      ripple.style.top = `${e.clientY - r.top - size / 2}px`;
+      host.appendChild(ripple);
+      setTimeout(() => ripple.remove(), 650);
+    });
     window.addEventListener("scroll", () => {
       el("appbar").classList.toggle("scrolled", window.scrollY > 2);
     });

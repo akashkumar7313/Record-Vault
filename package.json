@@ -1,0 +1,26 @@
+{
+  "name": "recordvault",
+  "version": "1.0.0",
+  "description": "An **offline-first** personal records manager built with Flutter. Records are stored locally in SQLite, so the app works fully without a network. When online, an optional background sync mirrors records to a Google Sheets + Google Drive backend and pushes queued changes back. Records can also be exported to Excel.",
+  "main": "app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/akashkumar7313/Record-Vault.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/akashkumar7313/Record-Vault/issues"
+  },
+  "homepage": "https://github.com/akashkumar7313/Record-Vault#readme",
+  "dependencies": {
+    "@capacitor/android": "^8.5.3",
+    "@capacitor/cli": "^8.5.3",
+    "@capacitor/core": "^8.5.3"
+  }
+}

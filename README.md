@@ -1,195 +1,298 @@
 # RecordVault
 
-An **offline-first** personal records manager built with Flutter. Records are
-stored locally in SQLite, so the app works fully without a network. When online,
-an optional background sync mirrors records to a Google Sheets + Google Drive
-backend and pushes queued changes back. Records can also be exported to Excel.
+An **offline-first** personal records manager built as a vanilla web app
+(HTML + CSS + JavaScript, no framework) and packaged for Android with
+**Capacitor** — so it runs as an installable APK with no hosting required.
+
+Records live in a **Google Sheets backend** (configurable Apps Script web app).
+The app keeps a local cache, so browsing and search keep working without a
+network; changes are queued and pushed the next time sync runs. Records can
+also be exported to an Excel (`.xlsx`) workbook.
 
 Every record is identified by its **12-digit Aadhaar number**, which doubles as
-the sync idempotency key — this is what makes retries safe and prevents duplicate
-rows on the server.
+the sync idempotency key — this is what makes retries safe and prevents
+duplicate rows on the server.
 
 ---
 
 ## Features
 
-- **Offline-first CRUD** — create, edit, view and delete records with no network.
-- **Profile photos** — picked from the gallery, stored in private app storage,
-  uploaded to Google Drive on sync, and backfilled on a fresh install.
-- **Search** — by name, mobile number or Aadhaar number.
-- **Dashboard** — sync summary ring, pending/conflict counts, recent records,
+- **Mobile login + OTP** — allowlisted mobile numbers sign in with a fixed OTP;
+  the session expires after 30 minutes.
+- **Offline-first** — records are cached locally; the app is fully usable
+  without a network and syncs later.
+- **Dashboard** — sync ring, pending/conflict counts, recent records, search,
   and quick actions.
-- **Background sync** — manual (pull-to-refresh / sync button) and automatic on
-  connectivity returning.
-- **Conflict handling** — never auto-overwrites; the user chooses `keep mine` or
-  `use server version`.
+- **Records CRUD** — add, view, edit and delete records with full field
+  validation (Aadhaar, IFSC, account number, mobile, etc.).
+- **Search** — by name, mobile number, Aadhaar number or application number.
+- **Sync** — push-then-pull against the Sheets backend, with statuses
+  (`pending` / `synced` / `failed` / `conflict`).
+- **Conflict handling** — never auto-overwrites; the user chooses *keep mine* or
+  *use server version*.
 - **Soft delete** — records are tombstoned locally and only removed after the
   server confirms the deletion.
-- **Excel export** — share or save an `.xlsx` workbook of all records.
+- **Excel export** — export every record (all fields + created/updated/status)
+  as an `.xlsx` workbook; the xlsx library is bundled locally, works offline.
 - **Theming** — system / light / dark, persisted locally.
-- **Privacy-first logging** — a `SafeLogger` that never logs personal values.
+- **Demo mode** — sample data for trying the app without a backend.
+- **Fully offline UI** — fonts (Roboto + Material Symbols) and the xlsx library
+  are bundled in the app, no CDN needed at runtime.
 
 ---
 
-## Getting Started
+## Screens
 
-```bash
-flutter pub get
-flutter run
+```
+App (login → session)
+└── Bottom navigation
+    ├── Dashboard   — sync summary, recent records, quick actions
+    ├── Records     — full list + search, tap for details, edit/delete
+    └── Settings    — endpoint, connection test, sync, export, theme, privacy
+
+Pushed on top:
+├── Record form    — create / edit (validated, sectioned: Identity, Family,
+│                    Address, Bank, Contact)
+└── Record details — full record view with sync status
 ```
 
-Point the app at your own backend without editing source:
+---
 
-```bash
-flutter run --dart-define=RECORD_VAULT_SHEETS_URL=https://script.google.com/macros/s/XXXX/exec
+## Record fields
+
+| Field | Notes |
+|-------|-------|
+| `applicationNo` | Optional application number |
+| `name` | Full name |
+| `gender` | Male / Female |
+| `aadhaarNumber` | 12 digits — primary key + sync idempotency key |
+| `guardianName`, `relation` | Father's or husband's name + relation |
+| `address`, `addressCorrect` | Current and corrected address |
+| `bankName`, `accountNumber`, `ifscCode` | Bank details |
+| `mobileNumberCorrect` | 10-digit mobile number |
+| `remarks` | Free-form notes |
+
+Sync metadata: `pending` / `synced` / `failed` / `conflict`, created/updated
+timestamps, soft-delete tombstone flag.
+
+---
+
+## Project structure
+
 ```
+RecordVault/
+├── index.html          # Web app entry
+├── app.js              # All app logic (login, UI, storage, sync, export)
+├── styles.css          # App styles + themes
+├── www/                # Assets packaged into the Android app
+│   ├── index.html      #   (references fonts + xlsx locally, not CDN)
+│   ├── app.js
+│   ├── styles.css
+│   ├── fonts.css       #   local @font-face rules
+│   ├── fonts/          #   Roboto + Material Symbols woff2 files
+│   └── vendor/         #   xlsx.full.min.js
+├── android/            # Capacitor Android project (generated)
+├── tool/apps_script/   # Google Apps Script backend (Code.gs)
+├── capacitor.config.json
+└── package.json
+```
+
+---
+
+## Configuration
+
+Everything is configured at the top of `app.js`:
+
+| Constant | Purpose |
+|----------|---------|
+| `DEFAULT_ENDPOINT` | Default Google Apps Script web-app URL |
+| `AUTH.mobiles` | Allowlisted mobile numbers that may sign in |
+| `AUTH.otp` | The OTP accepted at login |
+| `AUTH.sessionMs` | Session length (30 minutes) |
+
+Users can also point the app at their own backend from **Settings** — the
+endpoint is stored in `localStorage` as `rv_endpoint`.
 
 > The default Apps Script endpoint is a **public, unauthenticated** web app.
-> Anyone with the URL can read/write what it exposes. Use dummy data until an
-> authenticated backend is deployed.
+> Anyone with the URL can read/write what it exposes. Use dummy/demo data until
+> an authenticated backend is deployed.
 
-### Tests & analysis
+---
+
+## Run the web app
+
+The web app has no build step — serve the folder with any static server:
 
 ```bash
-flutter analyze
-flutter test
+npx serve .          # or: python3 -m http.server 8000
 ```
 
-Unit tests run against an in-memory SQLite database via `sqflite_common_ffi`,
-so no device is required.
+Then open http://localhost:3000 (or :8000).
 
 ---
 
-## Architecture
+## Build the Android APK
 
-The project follows a **layered, feature-first** structure. Dependencies point
-inward: UI → providers → repository → database, and UI → providers → services.
+### Prerequisites
 
-```
-lib/
-├── main.dart                     # App entry: installs error handler, runApp
-├── app/                          # App shell, routing, theme
-│   ├── app.dart                  # Root MaterialApp (theme + routes)
-│   ├── router.dart               # Named routes + onGenerateRoute
-│   ├── shell/home_shell.dart     # Bottom-nav scaffold (3 tabs)
-│   └── theme/                    # AppTheme, spacing, themeMode provider
-├── core/                         # Cross-cutting, dependency-free helpers
-│   ├── constants/                # AppConstants (timeouts, keys, limits)
-│   ├── errors/                   # AppException + AppErrorHandler
-│   ├── utils/                    # formatters, validators, SafeLogger
-│   └── widgets/                  # Reusable UI (buttons, fields, dialogs...)
-├── data/                         # Domain + infrastructure
-│   ├── database/app_database.dart        # Low-level SQLite (sqflite)
-│   ├── models/                           # PersonalRecord, Gender, SyncStatus
-│   ├── repositories/record_repository.dart # Domain-facing persistence API
-│   ├── services/                         # Sheets, sync, photos, export, ...
-│   └── providers/data_providers.dart     # Riverpod wiring of the data layer
-└── features/                     # One folder per feature (UI + providers)
-    ├── dashboard/                # Overview screen
-    ├── records/                  # List, form, details
-    ├── settings/                 # Sync, export, theme, privacy
-    └── export/                   # Excel export controller
+- Node.js + npm
+- JDK 17+ (JDK 21 works)
+- Android SDK + build-tools (installed via Android Studio or `sdkmanager`)
+
+### One-time setup
+
+```bash
+npm install                 # install Capacitor deps
+npx cap add android         # already done if android/ exists
+echo "sdk.dir=$HOME/Library/Android/sdk" > android/local.properties
 ```
 
-### Layers
+> **Note (macOS + Java networking):** if Gradle fails with
+> `SocketTimeoutException` while `curl` works fine, your network is unreachable
+> over IPv6 for Java. Add `-Djava.net.preferIPv4Stack=true` to
+> `org.gradle.jvmargs` in `android/gradle.properties` (already done in this
+> repo). If the Gradle wrapper distribution itself cannot download (it is
+> served from `release-assets.githubusercontent.com`), download the zip listed
+> in `android/gradle/wrapper/gradle-wrapper.properties` with `curl` and unpack
+> it into `~/.gradle/wrapper/dists/gradle-8.14.3-all/<hash>/` together with a
+> `<zipname>.ok` marker file.
 
-| Layer | Responsibility | Key files |
-|-------|----------------|-----------|
-| **UI** | Screens and widgets, no business logic | `features/**/screens`, `core/widgets` |
-| **State** | Riverpod providers/controllers | `features/**/providers`, `data/providers` |
-| **Domain/Repo** | Persistence API, sync rules | `record_repository.dart`, `sync_service.dart` |
-| **Data** | SQLite + remote services | `app_database.dart`, `services/*` |
+### Sync web assets → build debug APK
 
----
-
-## App Flow
-
-### Navigation
-
-`HomeShell` hosts three tabs in an `IndexedStack` (state is preserved across
-tabs). The selected tab lives in `navigationTabProvider`.
-
-```
-HomeShell
-├── Dashboard   → greeting, sync summary, search, recent records, quick actions
-├── Records     → full list + search, tap for details, edit/delete
-└── Settings    → sync status, connection test, Excel export, theme, privacy
+```bash
+cp index.html app.js styles.css www/   # only when web files changed
+npx cap sync android
+cd android
+./gradlew assembleDebug
 ```
 
-Two routes are pushed on top of the shell (`app/router.dart`):
+Output:
 
-- `/record/form` — create (no args) or edit (pass `RecordFormArgs(record:)`).
-- `/record/details` — pass the Aadhaar number as the argument.
+```
+android/app/build/outputs/apk/debug/app-debug.apk
+```
 
-### Add / Edit a record
+Install it on a phone (allow "install unknown apps"). Debug APKs are signed
+with a debug key — fine for personal use and testing.
 
-1. `RecordFormScreen` validates input (`core/utils/validators.dart`).
-2. On new records it blocks a duplicate Aadhaar before saving.
-3. `RecordsController.save()` writes to SQLite and marks the record `pending`.
-4. A best-effort `syncNow()` is triggered; the UI never blocks on the network.
-5. On success the screen pops back to the list.
+### Build a release APK
 
-### Delete a record
+**1. Generate a keystore (once, ever):**
 
-1. Confirm dialog → `RecordsController.softDelete()` writes a tombstone
-   (`isDeleted = true`, `syncStatus = pending`).
-2. The row stays locally until the sync push confirms it, then it is
-   hard-deleted.
+```bash
+keytool -genkeypair -v \
+  -keystore ~/recordvault-release.jks \
+  -alias recordvault \
+  -keyalg RSA -keysize 2048 -validity 10000
+```
 
-### Search
+Keep the password and the `.jks` file safe — losing them means you can never
+publish an update to the same app identity again.
 
-`searchQueryProvider` holds the query and is shared between Dashboard and
-Records. `RecordsController` re-reads from SQLite filtered by that query.
+**2. Create `android/key.properties`:**
+
+```properties
+storeFile=/Users/YOU/recordvault-release.jks
+storePassword=YOUR_STORE_PASSWORD
+keyAlias=recordvault
+keyPassword=YOUR_KEY_PASSWORD
+```
+
+> Never commit `key.properties` or the keystore — add both to `.gitignore`.
+
+**3. Wire the signing config into `android/app/build.gradle`:**
+
+Load the properties at the top of the file (outside `android { }`):
+
+```gradle
+def keyProps = new Properties()
+def keyFile = rootProject.file("key.properties")
+if (keyFile.exists()) {
+    keyProps.load(new FileInputStream(keyFile))
+}
+```
+
+Then inside `android { ... }`:
+
+```gradle
+signingConfigs {
+    release {
+        storeFile file(keyProps["storeFile"])
+        storePassword keyProps["storePassword"]
+        keyAlias keyProps["keyAlias"]
+        keyPassword keyProps["keyPassword"]
+    }
+}
+buildTypes {
+    release {
+        signingConfig signingConfigs.release
+        minifyEnabled false
+    }
+}
+```
+
+**4. Build:**
+
+```bash
+npx cap sync android
+cd android
+./gradlew assembleRelease
+```
+
+Output:
+
+```
+android/app/build/outputs/apk/release/app-release.apk
+```
+
+This APK is signed for release and ready for sideloading or Play Store upload.
+
+> A debug APK and a release APK are signed with different keys. If the debug
+> version is already installed on a phone, uninstall it first or installation
+> fails with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
 
 ---
 
 ## Sync Flow
 
-Sync is a **push-then-pull** cycle coordinated by `SyncService.syncAll()`,
-driven by `SyncController` (`settings_providers.dart`). It runs manually and
-automatically when connectivity returns.
+Sync is a **push-then-pull** cycle. It runs on app load, via the sync button,
+and after saving a record; queued changes are kept locally until the server
+confirms them.
 
 ```
-                Manual / connectivity-triggered
+                Manual / save-triggered
                              │
                              ▼
         ┌───────────────────────────────────────┐
         │  1. PUSH  (local → server)             │
-        │     getPending() = pending + failed    │
-        │     + tombstones (never conflicts)     │
+        │     pending + failed + tombstones      │
         │     • deleted → POST action=delete     │
         │     • new     → POST action=add        │
         │     • known   → POST action=update     │
-        │     photo → base64 → Drive fileId      │
-        │     confirmed → markSynced(), else fail│
+        │     confirmed → mark synced, else fail │
         └───────────────────────────────────────┘
                              │ (offline? stop, keep queue)
                              ▼
         ┌───────────────────────────────────────┐
-        │  2. PULL   (server → local)            │
+        │  2. PULL   (server → local cache)      │
         │     GET all records, compare by Aadhaar│
         │     • remote-only      → insert        │
         │     • remote newer      → update       │
-        │     • photo backfill    → download     │
         │     • both changed      → conflict     │
         │     • missing remotely  → conflict     │
         └───────────────────────────────────────┘
                              │
                              ▼
-                    SyncReport → SyncState (UI)
+                        Sync status (UI)
 ```
 
 ### Guarantees
 
 - Local records are **never deleted** until the server confirms the delete.
-- A record is marked `synced` **only** after explicit server confirmation
-  (an ambiguous `200` is treated as unconfirmed).
 - Conflicts are **flagged, never auto-overwritten**.
 - A failed push leaves the local record intact for a later retry.
-- `markSynced` only applies if the local copy still matches the version that was
-  sent — so an edit made mid-flight is not clobbered.
 
-### Sync statuses (`SyncStatus`)
+### Sync statuses
 
 | Status | Meaning |
 |--------|---------|
@@ -200,33 +303,18 @@ automatically when connectivity returns.
 
 ---
 
-## Data Model
+## Local storage
 
-### `PersonalRecord`
+All state lives in `localStorage`:
 
-Immutable, null-safe domain entity. Local fields (`syncStatus`, `photoPath`,
-tombstone flags) are excluded from the remote payload.
+| Key | Contents |
+|-----|----------|
+| `rv_cache` | Cached record list (offline copy) |
+| `rv_endpoint` | Custom backend Apps Script URL (if set) |
+| `rv_session` | Login session (expires after 30 minutes) |
+| `rv_theme` | `system` / `light` / `dark` |
 
-| Field | Notes |
-|-------|-------|
-| `aadhaarNumber` | Primary key + sync idempotency key |
-| `fullName`, `fatherName`, `motherName` | Identity |
-| `mobileNumber`, `email`, `address` | Contact |
-| `dateOfBirth`, `gender` | Stored as stable strings |
-| `photoPath` | Local private-storage path |
-| `photoFileId` | Google Drive file id (after sync) |
-| `createdAt`, `updatedAt` | UTC timestamps |
-| `syncStatus`, `lastSyncedAt`, `remoteUpdatedAt` | Sync metadata |
-| `isDeleted`, `deletedAt` | Soft-delete tombstone |
-
-### Local storage (SQLite)
-
-- `records` — all fields above, keyed by `aadhaar_number`, indexed on
-  `full_name`, `mobile_number`, `updated_at`, `sync_status`.
-- `app_meta` — key/value store (`last_sync_at`, `theme_mode`).
-
-`AppDatabase` accepts an injectable `DatabaseFactory`/path so tests use an
-in-memory database.
+> Uninstalling the Android app wipes this data. Use sync/export as backup.
 
 ---
 
@@ -237,29 +325,22 @@ Reference server: `tool/apps_script/Code.gs` (deployed as a Web App).
 ```
 GET  → { "success": true, "data": [ ... ] }
 POST → { "action": "add" | "update" | "delete", "record": { ... } }
-       → { "success": true, "action": "...", "aadhaarNumber": "...",
-           "photoFileId": "<driveFileId|''>" }
+       → { "success": true, "action": "...", "aadhaarNumber": "..." }
        → { "success": false, "message": "..." }
 ```
 
 - Records are matched on the 12-digit Aadhaar number, so `add` is an **upsert**.
-- `photoBase64` is uploaded to Google Drive and its file id stored.
-- `GoogleSheetsService` follows the Apps Script `302` redirect manually and
-  retries idempotent reads/writes with backoff.
+- The endpoint is followed manually with retries/backoff for idempotent
+  reads/writes.
 
 ---
 
-## Testing
+## Privacy & security notes
 
-```
-test/
-├── core/validators_test.dart
-├── data/personal_record_test.dart
-├── data/record_repository_test.dart
-├── data/sync_service_test.dart
-├── data/google_sheets_service_test.dart
-├── data/excel_export_service_test.dart
-├── data/photo_storage_service_test.dart
-├── helpers/test_database.dart          # In-memory sqflite fixture
-└── widget_test.dart
-```
+- The login allowlist and OTP live in client-side code (`app.js`) — this is a
+  convenience gate, **not** real security. Deploy an authenticated backend for
+  anything sensitive.
+- Exported files contain personal information — share only with trusted
+  recipients.
+- The app collects only the fields you enter; nothing is sent anywhere except
+  the configured backend.
