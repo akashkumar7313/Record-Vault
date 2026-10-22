@@ -1,49 +1,111 @@
 /**
- * RecordVault — Google Apps Script Backend (15 Columns Only)
+ * RecordVault — Google Apps Script Backend
  *
- * Headers:
- * 1.  Application No
- * 2.  Name
- * 3.  Name / Father's or Husband's
- * 4.  Relation
- * 5.  Male / Female
- * 6.  Aadhaar Number
- * 7.  Address
- * 8.  Bank Name
- * 9.  Account Number
- * 10. IFSC Code
- * 11. Address Correct
- * 12. Mobile Number Correct
- * 13. Remarks
- * 14. Created At
- * 15. Updated At
+ * Headers (exact order matches the app + Google Sheet):
+ * 1.  S.R
+ * 2.  Application_No
+ * 3.  AADHAR NUMBER
+ * 4.  MOBILE NUMBER CORECT
+ * 5.  NAME
+ * 6.  NAME HINDI
+ * 7.  NAME PROPER
+ * 8.  AYA NAME
+ * 9.  F/H NAME
+ * 10. NAME HINDI          (second, duplicate header — kept positionally)
+ * 11. F/H NAME PROPER
+ * 12. RELETION
+ * 13. FULE NAME PROPER
+ * 14. MALE / FEMALE
+ * 15. MOTHER NAME
+ * 16. ADDRESS
+ * 17. WARD N0
+ * 18. HOUSE N0
+ * 19. BILL NO
+ * 20. BILL DATE
+ * 21. SAMPATTI CODE
+ * 22. BANK NAME
+ * 23. ACCOUNNT NUMBER
+ * 24. IFSC CODE
+ * 25. THOUGHT
+ * 26. ADDRES CORECT
+ * 27. Created At
+ * 28. Updated At
  */
 
 var SPREADSHEET_ID = '1-xzBomnHFpclUKpzED7f60Lzo121HtWdwdDxISP9_Nw';
 var SHEET_NAME = 'Records';
-var CODE_VERSION = 'v15-clean';
+var CODE_VERSION = 'v28-new';
 
 var COLUMNS = [
-  'Application No',
-  'Name',
-  "Name / Father's or Husband's",
-  'Relation',
-  'Male / Female',
-  'Aadhaar Number',
-  'Address',
-  'Bank Name',
-  'Account Number',
-  'IFSC Code',
-  'Address Correct',
-  'Mobile Number Correct',
-  'Remarks',
+  'S.R',
+  'Application_No',
+  'AADHAR NUMBER',
+  'MOBILE NUMBER CORECT',
+  'NAME',
+  'NAME HINDI',
+  'NAME PROPER',
+  'AYA NAME',
+  'F/H NAME',
+  'NAME HINDI',
+  'F/H NAME PROPER',
+  'RELETION',
+  'FULE NAME PROPER',
+  'MALE / FEMALE',
+  'MOTHER NAME',
+  'ADDRESS',
+  'WARD N0',
+  'HOUSE N0',
+  'BILL NO',
+  'BILL DATE',
+  'SAMPATTI CODE',
+  'BANK NAME',
+  'ACCOUNNT NUMBER',
+  'IFSC CODE',
+  'THOUGHT',
+  'ADDRES CORECT',
   'Created At',
   'Updated At'
 ];
 
-var AADHAAR_INDEX = 5; // 0-based index of 'Aadhaar Number'
+// Unique internal key for each column, in the same order as COLUMNS.
+// Needed because 'NAME HINDI' appears twice.
+var KEYS = [
+  'srNo',
+  'applicationNo',
+  'aadhaarNumber',
+  'mobileNumberCorrect',
+  'name',
+  'nameHindi',
+  'nameProper',
+  'ayaName',
+  'fatherHusbandName',
+  'nameHindi2',
+  'fatherHusbandNameProper',
+  'relation',
+  'fullNameProper',
+  'gender',
+  'motherName',
+  'address',
+  'wardNo',
+  'houseNo',
+  'billNo',
+  'billDate',
+  'sampattiCode',
+  'bankName',
+  'accountNumber',
+  'ifscCode',
+  'thought',
+  'addressCorrect',
+  'createdAt',
+  'updatedAt'
+];
 
+var AADHAAR_INDEX = 2;               // 0-based index of 'AADHAR NUMBER'
+var IFSC_INDEX = 23;                 // 0-based index of 'IFSC CODE'
+var CREATED_INDEX = COLUMNS.length - 2;
+var UPDATED_INDEX = COLUMNS.length - 1;
 
+  
 /* -------------------- RESPONSE HELPERS -------------------- */
 
 function jsonResponse(data) {
@@ -93,15 +155,15 @@ function getSheet_() {
     }
   }
 
-  ensure15Columns_(sheet);
+  ensureColumns_(sheet);
   return sheet;
 }
 
 /**
- * Enforces exactly the 15 requested columns.
+ * Enforces exactly the requested columns.
  * Removes any leftover legacy columns and deletes rogue header rows.
  */
-function ensure15Columns_(sheet) {
+function ensureColumns_(sheet) {
   var lastRow = sheet.getLastRow();
   var lastCol = sheet.getLastColumn();
 
@@ -112,26 +174,20 @@ function ensure15Columns_(sheet) {
     return;
   }
 
-  // Ensure row 1 has the exact 15 headers
+  // Ensure row 1 has the exact headers
   sheet.getRange(1, 1, 1, COLUMNS.length).setNumberFormat('@');
   sheet.getRange(1, 1, 1, COLUMNS.length).setValues([COLUMNS]);
 
-  // Remove any surplus columns past column 15
+  // Remove any surplus columns past the required count
   if (lastCol > COLUMNS.length) {
     sheet.deleteColumns(COLUMNS.length + 1, lastCol - COLUMNS.length);
   }
 
-  // Remove rogue rows that contain old header text like 'aadhaarNumber' or 'fullName'
+  // Remove rogue rows that contain old header text like 'aadhaarNumber' or 'id'
   var values = sheet.getDataRange().getDisplayValues();
   for (var r = values.length - 1; r >= 1; r--) {
     var firstCell = String(values[r][0] || '').trim();
-    var sixthCell = String(values[r][5] || '').trim();
-    if (
-      firstCell === 'aadhaarNumber' ||
-      firstCell === 'id' ||
-      sixthCell === 'email' ||
-      sixthCell === 'photoFileId'
-    ) {
+    if (firstCell === 'aadhaarNumber' || firstCell === 'id') {
       sheet.deleteRow(r + 1);
     }
   }
@@ -142,68 +198,52 @@ function ensure15Columns_(sheet) {
 function rowToRecord_(row) {
   var rec = {};
   for (var i = 0; i < COLUMNS.length; i++) {
-    var colName = COLUMNS[i];
-    rec[colName] = row[i] != null ? String(row[i]) : '';
+    var value = row[i] != null ? String(row[i]) : '';
+    rec[KEYS[i]] = value;
+    // Also expose the sheet header for clients that read by header name.
+    // Skipped when a header repeats (the second 'NAME HINDI'), so the alias
+    // always refers to the first occurrence.
+    if (rec[COLUMNS[i]] === undefined) rec[COLUMNS[i]] = value;
   }
 
-  // Also expose camelCase properties for apps / clients
-  rec.applicationNo = rec['Application No'];
-  rec.name = rec['Name'];
-  rec.fullName = rec['Name'];
-  rec.guardianName = rec["Name / Father's or Husband's"];
-  rec.fatherName = rec["Name / Father's or Husband's"];
-  rec.relation = rec['Relation'];
-  rec.gender = String(rec['Male / Female']).toLowerCase();
-  rec.aadhaarNumber = cleanDigits_(rec['Aadhaar Number']);
-  rec.address = rec['Address'];
-  rec.bankName = rec['Bank Name'];
-  rec.accountNumber = rec['Account Number'];
-  rec.ifscCode = rec['IFSC Code'];
-  rec.addressCorrect = rec['Address Correct'];
-  rec.mobileNumberCorrect = rec['Mobile Number Correct'];
-  rec.remarks = rec['Remarks'];
-  rec.createdAt = rec['Created At'];
-  rec.updatedAt = rec['Updated At'];
+  rec.aadhaarNumber = cleanDigits_(rec.aadhaarNumber);
+  rec.gender = String(rec.gender || '').toLowerCase();
 
   return rec;
 }
 
 function recordToRow_(record, existingRow, aadhaar) {
   var now = new Date().toISOString();
+  var row = [];
 
-  var appNo = record['Application No'] !== undefined ? record['Application No'] : (record.applicationNo || '');
-  var name = record['Name'] !== undefined ? record['Name'] : (record.name || record.fullName || '');
-  var guardian = record["Name / Father's or Husband's"] !== undefined ? record["Name / Father's or Husband's"] : (record.guardianName || record.fatherName || '');
-  var rel = record['Relation'] !== undefined ? record['Relation'] : (record.relation || '');
-  var gen = record['Male / Female'] !== undefined ? record['Male / Female'] : (record.gender || '');
-  var aadh = aadhaar || record['Aadhaar Number'] || record.aadhaarNumber || '';
-  var addr = record['Address'] !== undefined ? record['Address'] : (record.address || '');
-  var bank = record['Bank Name'] !== undefined ? record['Bank Name'] : (record.bankName || '');
-  var acc = record['Account Number'] !== undefined ? record['Account Number'] : (record.accountNumber || '');
-  var ifsc = record['IFSC Code'] !== undefined ? record['IFSC Code'] : (record.ifscCode || '');
-  var addrCorr = record['Address Correct'] !== undefined ? record['Address Correct'] : (record.addressCorrect || '');
-  var mobCorr = record['Mobile Number Correct'] !== undefined ? record['Mobile Number Correct'] : (record.mobileNumberCorrect || record.mobileNumber || '');
-  var rem = record['Remarks'] !== undefined ? record['Remarks'] : (record.remarks || '');
-  var created = record['Created At'] || record.createdAt || (existingRow ? existingRow[13] : '') || now;
-  var updated = now;
+  for (var i = 0; i < COLUMNS.length; i++) {
+    var key = KEYS[i];
+    var value;
+    if (record[key] !== undefined) {
+      value = record[key];
+    } else if (key !== 'nameHindi2' && record[COLUMNS[i]] !== undefined) {
+      // Header-keyed payloads are accepted for every column except the
+      // duplicate 'NAME HINDI' (which is addressed by its unique key).
+      value = record[COLUMNS[i]];
+    } else {
+      value = existingRow ? existingRow[i] : '';
+    }
+    row.push(value);
+  }
 
-  return [
-    String(appNo != null ? appNo : (existingRow ? existingRow[0] : '')),
-    String(name != null ? name : (existingRow ? existingRow[1] : '')),
-    String(guardian != null ? guardian : (existingRow ? existingRow[2] : '')),
-    String(rel != null ? rel : (existingRow ? existingRow[3] : '')),
-    String(gen != null ? gen : (existingRow ? existingRow[4] : '')),
-    cleanDigits_(aadh != null ? aadh : (existingRow ? existingRow[5] : '')),
-    String(addr != null ? addr : (existingRow ? existingRow[6] : '')),
-    String(bank != null ? bank : (existingRow ? existingRow[7] : '')),
-    String(acc != null ? acc : (existingRow ? existingRow[8] : '')),
-    String(ifsc != null ? ifsc : (existingRow ? existingRow[9] : '')).toUpperCase(),
-    String(addrCorr != null ? addrCorr : (existingRow ? existingRow[10] : '')),
-    String(mobCorr != null ? mobCorr : (existingRow ? existingRow[11] : '')),
-    String(rem != null ? rem : (existingRow ? existingRow[12] : '')),
-    String(created),
-    String(updated)
-  ];
+  row[AADHAAR_INDEX] = cleanDigits_(aadhaar || row[AADHAAR_INDEX] || '');
+  row[IFSC_INDEX] = String(row[IFSC_INDEX] != null ? row[IFSC_INDEX] : '').toUpperCase();
+
+  var created = row[CREATED_INDEX] || (existingRow ? existingRow[CREATED_INDEX] : '') || now;
+  var updated = row[UPDATED_INDEX] || now;
+  row[CREATED_INDEX] = String(created);
+  row[UPDATED_INDEX] = String(updated);
+
+  for (var j = 0; j < row.length; j++) {
+    row[j] = String(row[j] != null ? row[j] : '');
+  }
+
+  return row;
 }
 
 
@@ -241,7 +281,7 @@ function doGet(e) {
       }
 
       // Single query by Application No
-      if (reqAppNo && String(rec['Application No']).trim() === reqAppNo) {
+      if (reqAppNo && String(rec.applicationNo).trim() === reqAppNo) {
         return jsonResponse({ success: true, version: CODE_VERSION, data: rec });
       }
 
@@ -291,8 +331,8 @@ function doPost(e) {
 
     /* 1. READ ALL OR SINGLE */
     if (action === 'read' || action === 'get' || action === 'fetch' || action === 'list') {
-      var reqAadhaar = cleanDigits_(body.aadhaarNumber || body.aadhaar || record['Aadhaar Number'] || record.aadhaarNumber);
-      var reqAppNo = String(body.applicationNo || body.appNo || record['Application No'] || record.applicationNo || '').trim();
+      var reqAadhaar = cleanDigits_(body.aadhaarNumber || body.aadhaar || record['AADHAR NUMBER'] || record['Aadhaar Number'] || record.aadhaarNumber);
+      var reqAppNo = String(body.applicationNo || body.appNo || record['Application_No'] || record['Application No'] || record.applicationNo || '').trim();
 
       var all = [];
       for (var r = 1; r < values.length; r++) {
@@ -304,7 +344,7 @@ function doPost(e) {
         if (reqAadhaar && rec.aadhaarNumber === reqAadhaar) {
           return jsonResponse({ success: true, version: CODE_VERSION, action: 'read', data: rec });
         }
-        if (reqAppNo && String(rec['Application No']).trim() === reqAppNo) {
+        if (reqAppNo && String(rec.applicationNo).trim() === reqAppNo) {
           return jsonResponse({ success: true, version: CODE_VERSION, action: 'read', data: rec });
         }
 
@@ -322,6 +362,7 @@ function doPost(e) {
     var targetAadhaar = cleanDigits_(
       body.aadhaarNumber ||
       body.aadhaar ||
+      record['AADHAR NUMBER'] ||
       record['Aadhaar Number'] ||
       record.aadhaarNumber
     );
@@ -368,15 +409,15 @@ function doPost(e) {
         }
       }
       if (colIdx < 0) {
-        return errorResponse_('Column "' + body.columnName + '" is invalid. Must be one of the 15 headers.');
+        return errorResponse_('Column "' + body.columnName + '" is invalid. Must be one of the ' + COLUMNS.length + ' headers.');
       }
 
       var cell = sheet.getRange(rowIndex, colIdx);
       cell.setNumberFormat('@');
       cell.setValue(String(body.newValue != null ? body.newValue : ''));
 
-      // Update 'Updated At' (column 15)
-      sheet.getRange(rowIndex, 15).setValue(new Date().toISOString());
+      // Update 'Updated At' (last column)
+      sheet.getRange(rowIndex, UPDATED_INDEX + 1).setValue(new Date().toISOString());
       SpreadsheetApp.flush();
 
       return jsonResponse({
@@ -462,17 +503,17 @@ function doPost(e) {
 
 /**
  * Run this function from the Apps Script editor to instantly clean your sheet:
- * - Resets Row 1 to ONLY the 15 headers.
- * - Deletes any extra columns past column 15.
+ * - Resets Row 1 to ONLY the required headers.
+ * - Deletes any extra columns past the last required column.
  * - Deletes any extra rows containing old headers.
  */
 function cleanSheetNow() {
   var sheet = getSheet_();
-  ensure15Columns_(sheet);
+  ensureColumns_(sheet);
 
   var result = {
     success: true,
-    message: 'Sheet cleaned! Exactly 15 columns exist now.',
+    message: 'Sheet cleaned! Exactly ' + COLUMNS.length + ' columns exist now.',
     headers: COLUMNS,
     totalRows: sheet.getLastRow()
   };

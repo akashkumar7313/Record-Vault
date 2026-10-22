@@ -2,7 +2,7 @@
   "use strict";
 
   const DEFAULT_ENDPOINT =
-    "https://script.google.com/macros/s/AKfycbwln52lRzFfn-G-jTntwRBWm3ijeOZXjNEJZAKX7DHMm7iKvWO8dfL-lw5rVWscnQ4NJQ/exec";
+    "https://script.google.com/macros/s/AKfycbwNTPiNfNBuUKbOBhnUiKpZ8m06Bo5lm55aS-9NR0jAOvbLCITc9x7TcRUG4xigMgxATg/exec";
   const TIMEOUT_MS = 45000;
   const READ_RETRIES = 2;
   const WRITE_RETRIES = 2;
@@ -211,6 +211,16 @@
     return digits;
   }
 
+  // Next serial number = (highest numeric S.R in the loaded list) + 1.
+  function nextSrNo() {
+    let max = 0;
+    for (const r of (S.records || [])) {
+      const n = parseInt(String(r.srNo == null ? "" : r.srNo).replace(/[^0-9]/g, ""), 10);
+      if (!Number.isNaN(n) && n > max) max = n;
+    }
+    return String(max + 1);
+  }
+
   const IFSC_RE = /^[A-Z]{4}0[A-Z0-9]{6}$/;
 
   const Validators = {
@@ -285,19 +295,36 @@
   };
 
   const FIELDS = [
-    { key: "applicationNo", header: "Application No", label: "Application No", icon: "confirmation_number", type: "text", placeholder: "Optional", group: "identity", validator: Validators.applicationNo },
-    { key: "name", header: "Name", label: "Name", icon: "person", type: "text", placeholder: "Full name", group: "identity", validator: Validators.name },
-    { key: "gender", header: "Male / Female", label: "Male / Female", icon: "wc", type: "select", group: "identity", validator: Validators.gender },
-    { key: "aadhaarNumber", header: "Aadhaar Number", label: "Aadhaar Number", icon: "badge", type: "text", numeric: 12, placeholder: "12-digit number", group: "identity", validator: Validators.aadhaar },
-    { key: "guardianName", header: "Name / Father's or Husband's", label: "Name / Father's or Husband's", icon: "man", type: "text", placeholder: "Father's or husband's name", group: "family", row: true, validator: Validators.guardianName },
-    { key: "relation", header: "Relation", label: "Relation", icon: "diversity_3", type: "text", placeholder: "Father / Husband", group: "family", row: true, validator: Validators.relation },
-    { key: "address", header: "Address", label: "Address", icon: "location_on", type: "textarea", placeholder: "Full address", group: "address", validator: Validators.address },
-    { key: "addressCorrect", header: "Address Correct", label: "Address Correct", icon: "home_pin", type: "textarea", placeholder: "Corrected address (if any)", group: "address", validator: Validators.addressCorrect },
-    { key: "bankName", header: "Bank Name", label: "Bank Name", icon: "account_balance", type: "text", placeholder: "Bank name", group: "bank", row: true, validator: Validators.bankName },
-    { key: "accountNumber", header: "Account Number", label: "Account Number", icon: "numbers", type: "text", numeric: 18, placeholder: "Bank account number", group: "bank", row: true, validator: Validators.accountNumber },
-    { key: "ifscCode", header: "IFSC Code", label: "IFSC Code", icon: "pin", type: "text", uppercase: true, placeholder: "e.g. SBIN0001234", group: "bank", validator: Validators.ifsc },
-    { key: "mobileNumberCorrect", header: "Mobile Number Correct", label: "Mobile Number Correct", icon: "call", type: "text", numeric: 10, placeholder: "10-digit mobile number", group: "contact", validator: Validators.mobileNumberCorrect },
-    { key: "remarks", header: "Remarks", label: "Remarks", icon: "sticky_note_2", type: "textarea", placeholder: "Any remarks", group: "contact", validator: null },
+    { key: "srNo", header: "S.R", label: "S.R", icon: "badge", type: "text", autoFill: true, placeholder: "Auto", group: "identity", validator: null },
+    { key: "applicationNo", header: "Application_No", label: "Application No", icon: "confirmation_number", type: "text", placeholder: "Optional", group: "identity", validator: Validators.applicationNo },
+    { key: "aadhaarNumber", header: "AADHAR NUMBER", label: "Aadhaar Number", icon: "badge", type: "text", numeric: 12, placeholder: "12-digit number", group: "identity", validator: Validators.aadhaar },
+    { key: "mobileNumberCorrect", header: "MOBILE NUMBER CORECT", label: "Mobile Number Correct", icon: "call", type: "text", numeric: 10, placeholder: "10-digit mobile number", group: "contact", validator: Validators.mobileNumberCorrect },
+    { key: "name", header: "NAME", label: "Name", icon: "person", type: "text", placeholder: "Full name", group: "identity", validator: Validators.name },
+    { key: "nameHindi", header: "NAME HINDI", label: "Name (Hindi)", icon: "person", type: "text", autoFill: true, placeholder: "Auto", group: "identity", validator: null },
+    { key: "nameProper", header: "NAME PROPER", label: "Name Proper", icon: "person", type: "text", autoFill: true, placeholder: "Auto", group: "identity", validator: null },
+    { key: "ayaName", header: "AYA NAME", label: "Aya Name", icon: "person", type: "text", autoFill: true, placeholder: "Auto", group: "family", validator: null },
+    { key: "fatherHusbandName", header: "F/H NAME", label: "Father / Husband Name", icon: "man", type: "text", placeholder: "Father's or husband's name", group: "family", validator: Validators.guardianName },
+    { key: "nameHindi2", header: "NAME HINDI", label: "Name (Hindi) 2", icon: "person", type: "text", autoFill: true, placeholder: "Auto", group: "identity", validator: null },
+    { key: "fatherHusbandNameProper", header: "F/H NAME PROPER", label: "F/H Name Proper", icon: "man", type: "text", autoFill: true, placeholder: "Auto", group: "family", validator: null },
+    { key: "relation", header: "RELETION", label: "Relation", icon: "diversity_3", type: "select", custom: true, options: [
+      { value: "W/o", label: "W/o (Wife of)" },
+      { value: "S/o", label: "S/o (Son of)" },
+      { value: "D/o", label: "D/o (Daughter of)" },
+    ], group: "family", validator: Validators.relation },
+    { key: "fullNameProper", header: "FULE NAME PROPER", label: "Full Name Proper", icon: "person", type: "text", autoFill: true, placeholder: "Auto", group: "identity", validator: null },
+    { key: "gender", header: "MALE / FEMALE", label: "Male / Female", icon: "wc", type: "select", group: "identity", validator: Validators.gender },
+    { key: "motherName", header: "MOTHER NAME", label: "Mother Name", icon: "woman", type: "text", placeholder: "Mother's name", group: "family", validator: null },
+    { key: "address", header: "ADDRESS", label: "Address", icon: "location_on", type: "textarea", placeholder: "Full address", group: "address", validator: Validators.address },
+    { key: "wardNo", header: "WARD N0", label: "Ward No", icon: "location_on", type: "text", placeholder: "Ward number", group: "address", validator: null },
+    { key: "houseNo", header: "HOUSE N0", label: "House No", icon: "home", type: "text", placeholder: "House number", group: "address", validator: null },
+    { key: "billNo", header: "BILL NO", label: "Bill No", icon: "receipt", type: "text", placeholder: "Bill number", group: "address", validator: null },
+    { key: "billDate", header: "BILL DATE", label: "Bill Date", icon: "calendar_today", type: "text", placeholder: "Bill date", group: "address", validator: null },
+    { key: "sampattiCode", header: "SAMPATTI CODE", label: "Sampatti Code", icon: "label", type: "text", placeholder: "Sampatti code", group: "address", validator: null },
+    { key: "bankName", header: "BANK NAME", label: "Bank Name", icon: "account_balance", type: "text", placeholder: "Bank name", group: "bank", validator: Validators.bankName },
+    { key: "accountNumber", header: "ACCOUNNT NUMBER", label: "Account Number", icon: "numbers", type: "text", numeric: 18, placeholder: "Bank account number", group: "bank", validator: Validators.accountNumber },
+    { key: "ifscCode", header: "IFSC CODE", label: "IFSC Code", icon: "pin", type: "text", uppercase: true, placeholder: "e.g. SBIN0001234", group: "bank", validator: Validators.ifsc },
+    { key: "thought", header: "THOUGHT", label: "Thought", icon: "sticky_note_2", type: "textarea", placeholder: "Any thought", group: "contact", validator: null },
+    { key: "addressCorrect", header: "ADDRES CORECT", label: "Corrected Address", icon: "home_pin", type: "textarea", placeholder: "Corrected address (if any)", group: "address", validator: Validators.addressCorrect },
   ];
 
   const FORM_SECTIONS = [
@@ -305,7 +332,7 @@
     { id: "family", title: "Family", hint: "Father's or husband's details" },
     { id: "address", title: "Address", hint: "Current and corrected address" },
     { id: "bank", title: "Bank details", hint: "Account linked with the record" },
-    { id: "contact", title: "Contact & remarks", hint: "Optional follow-up details" },
+    { id: "contact", title: "Contact & thought", hint: "Optional follow-up details" },
   ];
 
   function demoRecord(base) {
@@ -314,7 +341,7 @@
     const { ageDays, touchedDays, ...rest } = base;
     return {
       applicationNo: "",
-      guardianName: "",
+      fatherHusbandName: "",
       relation: "",
       gender: "",
       address: "",
@@ -329,42 +356,42 @@
 
   const DEMO_RECORDS = [
     demoRecord({
-      applicationNo: "RV-2024-001", name: "Anjali Sharma", guardianName: "Rakesh Sharma", relation: "Father",
+      applicationNo: "RV-2024-001", name: "Anjali Sharma", fatherHusbandName: "Rakesh Sharma", relation: "Father",
       gender: "female", aadhaarNumber: "234512345678", address: "12, Nehru Nagar, Bhopal, Madhya Pradesh 462001",
       bankName: "State Bank of India", accountNumber: "20145678901", ifscCode: "SBIN0001234",
       addressCorrect: "12/A, Nehru Nagar, Bhopal, MP 462001", mobileNumberCorrect: "9876543210",
-      remarks: "KYC verified", ageDays: 148, touchedDays: 2,
+      thought: "KYC verified", ageDays: 148, touchedDays: 2,
     }),
     demoRecord({
-      applicationNo: "RV-2024-014", name: "Rohan Verma", guardianName: "Suresh Verma", relation: "Father",
+      applicationNo: "RV-2024-014", name: "Rohan Verma", fatherHusbandName: "Suresh Verma", relation: "Father",
       gender: "male", aadhaarNumber: "345623456789", address: "88, MG Road, Indore, Madhya Pradesh 452001",
       bankName: "HDFC Bank", accountNumber: "50100234567", ifscCode: "HDFC0000456",
-      addressCorrect: "", mobileNumberCorrect: "9812345670", remarks: "", ageDays: 96, touchedDays: 5,
+      addressCorrect: "", mobileNumberCorrect: "9812345670", thought: "", ageDays: 96, touchedDays: 5,
     }),
     demoRecord({
-      applicationNo: "RV-2024-027", name: "Priya Nair", guardianName: "Arun Nair", relation: "Husband",
+      applicationNo: "RV-2024-027", name: "Priya Nair", fatherHusbandName: "Arun Nair", relation: "Husband",
       gender: "female", aadhaarNumber: "456734567890", address: "5, Marine Drive, Kochi, Kerala 682031",
       bankName: "ICICI Bank", accountNumber: "123456789012", ifscCode: "ICIC0001234",
       addressCorrect: "Flat 5B, Marine Drive, Kochi, Kerala 682031", mobileNumberCorrect: "9765432109",
-      remarks: "Address updated", ageDays: 62, touchedDays: 1,
+      thought: "Address updated", ageDays: 62, touchedDays: 1,
     }),
     demoRecord({
-      applicationNo: "RV-2024-033", name: "Imran Khan", guardianName: "Yusuf Khan", relation: "Father",
+      applicationNo: "RV-2024-033", name: "Imran Khan", fatherHusbandName: "Yusuf Khan", relation: "Father",
       gender: "male", aadhaarNumber: "567845678901", address: "221, Civil Lines, Lucknow, Uttar Pradesh 226001",
       bankName: "Punjab National Bank", accountNumber: "33445566778", ifscCode: "PUNB0221000",
-      addressCorrect: "", mobileNumberCorrect: "9700112233", remarks: "", ageDays: 44, touchedDays: 9,
+      addressCorrect: "", mobileNumberCorrect: "9700112233", thought: "", ageDays: 44, touchedDays: 9,
     }),
     demoRecord({
-      applicationNo: "RV-2024-041", name: "Kavita Deshmukh", guardianName: "Mahesh Deshmukh", relation: "Father",
+      applicationNo: "RV-2024-041", name: "Kavita Deshmukh", fatherHusbandName: "Mahesh Deshmukh", relation: "Father",
       gender: "female", aadhaarNumber: "678956789012", address: "7, FC Road, Pune, Maharashtra 411004",
       bankName: "Bank of Baroda", accountNumber: "09988776655", ifscCode: "BARB0PUNEXX",
-      addressCorrect: "", mobileNumberCorrect: "9611223344", remarks: "Docs pending", ageDays: 30, touchedDays: 3,
+      addressCorrect: "", mobileNumberCorrect: "9611223344", thought: "Docs pending", ageDays: 30, touchedDays: 3,
     }),
     demoRecord({
-      applicationNo: "RV-2024-058", name: "Deepak Yadav", guardianName: "Ram Yadav", relation: "Father",
+      applicationNo: "RV-2024-058", name: "Deepak Yadav", fatherHusbandName: "Ram Yadav", relation: "Father",
       gender: "male", aadhaarNumber: "789067890123", address: "45, Ring Road, Jaipur, Rajasthan 302004",
       bankName: "Axis Bank", accountNumber: "918273645546", ifscCode: "UTIB0000112",
-      addressCorrect: "", mobileNumberCorrect: "9555667788", remarks: "", ageDays: 12, touchedDays: 0,
+      addressCorrect: "", mobileNumberCorrect: "9555667788", thought: "", ageDays: 12, touchedDays: 0,
     }),
   ];
 
@@ -471,10 +498,19 @@
       return this.mutate("update", record);
     },
 
+    async transliterate(fields) {
+      const decoded = await this.send(
+        "POST",
+        JSON.stringify({ action: "transliterate", record: fields }),
+        WRITE_RETRIES
+      );
+      return decoded && decoded.data ? decoded.data : null;
+    },
+
     async deleteRecord(aadhaar) {
       const decoded = await this.send(
         "POST",
-        JSON.stringify({ action: "delete", record: { "Aadhaar Number": aadhaar, aadhaarNumber: aadhaar } }),
+        JSON.stringify({ action: "delete", record: { "AADHAR NUMBER": aadhaar, aadhaarNumber: aadhaar } }),
         WRITE_RETRIES
       );
       return interpretWrite(decoded, aadhaar);
@@ -510,25 +546,38 @@
     const created = parseDateAny(pick(item, ["Created At", "createdAt", "created_at", "created"]));
     const updated = parseDateAny(pick(item, ["Updated At", "updatedAt", "updated_at", "updated"])) || created;
     return {
-      applicationNo: String(pick(item, ["Application No", "applicationNo", "application_no", "appNo"]) || ""),
-      name: String(pick(item, ["Name", "name", "fullName", "full_name"]) || ""),
-      guardianName: String(
-        pick(item, ["Name / Father's or Husband's", "guardianName", "fatherName", "father_name", "husbandName"]) || ""
-      ),
-      relation: String(pick(item, ["Relation", "relation", "relationship"]) || ""),
-      gender: String(pick(item, ["Male / Female", "gender", "Gender"]) || "").toLowerCase(),
+      srNo: String(pick(item, ["S.R", "srNo", "sr_no"]) || ""),
+      applicationNo: String(pick(item, ["Application_No", "Application No", "applicationNo", "application_no", "appNo"]) || ""),
       aadhaarNumber: String(
-        pick(item, ["Aadhaar Number", "aadhaarNumber", "aadhaar_number", "aadhaar", "aadhar", "id", "recordId"]) || ""
+        pick(item, ["AADHAR NUMBER", "Aadhaar Number", "aadhaarNumber", "aadhaar_number", "aadhaar", "aadhar", "id", "recordId"]) || ""
       ),
-      address: String(pick(item, ["Address", "address"]) || ""),
-      bankName: String(pick(item, ["Bank Name", "bankName", "bank_name"]) || ""),
-      accountNumber: String(pick(item, ["Account Number", "accountNumber", "account_number"]) || ""),
-      ifscCode: String(pick(item, ["IFSC Code", "ifscCode", "ifsc_code", "ifsc"]) || ""),
-      addressCorrect: String(pick(item, ["Address Correct", "addressCorrect", "address_correct"]) || ""),
       mobileNumberCorrect: String(
-        pick(item, ["Mobile Number Correct", "mobileNumberCorrect", "mobileNumber", "mobile_number", "mobile"]) || ""
+        pick(item, ["MOBILE NUMBER CORECT", "MOBILE NUMBER CORRECT", "Mobile Number Correct", "mobileNumberCorrect", "mobileNumber", "mobile_number", "mobile"]) || ""
       ),
-      remarks: String(pick(item, ["Remarks", "remarks", "remark"]) || ""),
+      name: String(pick(item, ["NAME", "Name", "name", "fullName", "full_name"]) || ""),
+      nameHindi: String(pick(item, ["nameHindi", "NAME HINDI", "name_hindi"]) || ""),
+      nameProper: String(pick(item, ["NAME PROPER", "nameProper", "name_proper"]) || ""),
+      ayaName: String(pick(item, ["AYA NAME", "ayaName", "aya_name"]) || ""),
+      fatherHusbandName: String(
+        pick(item, ["F/H NAME", "Name / Father's or Husband's", "guardianName", "fatherName", "father_name", "husbandName"]) || ""
+      ),
+      nameHindi2: String(pick(item, ["nameHindi2", "name_hindi_2"]) || ""),
+      fatherHusbandNameProper: String(pick(item, ["F/H NAME PROPER", "fatherHusbandNameProper", "fh_name_proper"]) || ""),
+      relation: String(pick(item, ["RELETION", "RELATION", "Relation", "relation", "relationship"]) || ""),
+      fullNameProper: String(pick(item, ["FULE NAME PROPER", "FULL NAME PROPER", "fullNameProper", "full_name_proper"]) || ""),
+      gender: String(pick(item, ["MALE / FEMALE", "Male / Female", "gender", "Gender"]) || "").toLowerCase(),
+      motherName: String(pick(item, ["MOTHER NAME", "motherName", "mother_name"]) || ""),
+      address: String(pick(item, ["ADDRESS", "Address", "address"]) || ""),
+      wardNo: String(pick(item, ["WARD N0", "WARD NO", "wardNo", "ward_no"]) || ""),
+      houseNo: String(pick(item, ["HOUSE N0", "HOUSE NO", "houseNo", "house_no"]) || ""),
+      billNo: String(pick(item, ["BILL NO", "billNo", "bill_no"]) || ""),
+      billDate: String(pick(item, ["BILL DATE", "billDate", "bill_date"]) || ""),
+      sampattiCode: String(pick(item, ["SAMPATTI CODE", "sampattiCode", "sampatti_code"]) || ""),
+      bankName: String(pick(item, ["BANK NAME", "Bank Name", "bankName", "bank_name"]) || ""),
+      accountNumber: String(pick(item, ["ACCOUNNT NUMBER", "ACCOUNT NUMBER", "Account Number", "accountNumber", "account_number"]) || ""),
+      ifscCode: String(pick(item, ["IFSC CODE", "IFSC Code", "ifscCode", "ifsc_code", "ifsc"]) || ""),
+      thought: String(pick(item, ["THOUGHT", "thought"]) || ""),
+      addressCorrect: String(pick(item, ["ADDRES CORECT", "ADDRESS CORRECT", "Address Correct", "addressCorrect", "address_correct"]) || ""),
       createdAt: created,
       updatedAt: updated || created || new Date(),
       syncStatus: "synced",
@@ -536,23 +585,147 @@
   }
 
   function toRemoteJson(record) {
+    const createdAt = record.createdAt instanceof Date ? record.createdAt.toISOString() : (record.createdAt || new Date().toISOString());
+    const updatedAt = record.updatedAt instanceof Date ? record.updatedAt.toISOString() : (record.updatedAt || new Date().toISOString());
     return {
-      "Application No": record.applicationNo || "",
-      "Name": record.name || "",
-      "Name / Father's or Husband's": record.guardianName || "",
-      "Relation": record.relation || "",
-      "Male / Female": record.gender || "",
-      "Aadhaar Number": record.aadhaarNumber || "",
-      "Address": record.address || "",
-      "Bank Name": record.bankName || "",
-      "Account Number": record.accountNumber || "",
-      "IFSC Code": record.ifscCode || "",
-      "Address Correct": record.addressCorrect || "",
-      "Mobile Number Correct": record.mobileNumberCorrect || "",
-      "Remarks": record.remarks || "",
-      "Created At": record.createdAt instanceof Date ? record.createdAt.toISOString() : (record.createdAt || new Date().toISOString()),
-      "Updated At": record.updatedAt instanceof Date ? record.updatedAt.toISOString() : (record.updatedAt || new Date().toISOString()),
+      // Unique camelCase keys — understood by every backend build.
+      srNo: record.srNo || "",
+      applicationNo: record.applicationNo || "",
+      aadhaarNumber: record.aadhaarNumber || "",
+      mobileNumberCorrect: record.mobileNumberCorrect || "",
+      name: record.name || "",
+      nameHindi: record.nameHindi || "",
+      nameProper: record.nameProper || "",
+      ayaName: record.ayaName || "",
+      fatherHusbandName: record.fatherHusbandName || "",
+      nameHindi2: record.nameHindi2 || "",
+      fatherHusbandNameProper: record.fatherHusbandNameProper || "",
+      relation: record.relation || "",
+      fullNameProper: record.fullNameProper || "",
+      gender: record.gender || "",
+      motherName: record.motherName || "",
+      address: record.address || "",
+      wardNo: record.wardNo || "",
+      houseNo: record.houseNo || "",
+      billNo: record.billNo || "",
+      billDate: record.billDate || "",
+      sampattiCode: record.sampattiCode || "",
+      bankName: record.bankName || "",
+      accountNumber: record.accountNumber || "",
+      ifscCode: record.ifscCode || "",
+      thought: record.thought || "",
+      addressCorrect: record.addressCorrect || "",
+      createdAt,
+      updatedAt,
+      // Sheet-header aliases (exact header text) for header-keyed backends.
+      "S.R": record.srNo || "",
+      "Application_No": record.applicationNo || "",
+      "AADHAR NUMBER": record.aadhaarNumber || "",
+      "MOBILE NUMBER CORECT": record.mobileNumberCorrect || "",
+      "NAME": record.name || "",
+      "NAME HINDI": record.nameHindi || "",
+      "NAME PROPER": record.nameProper || "",
+      "AYA NAME": record.ayaName || "",
+      "F/H NAME": record.fatherHusbandName || "",
+      "F/H NAME PROPER": record.fatherHusbandNameProper || "",
+      "RELETION": record.relation || "",
+      "FULE NAME PROPER": record.fullNameProper || "",
+      "MALE / FEMALE": record.gender || "",
+      "MOTHER NAME": record.motherName || "",
+      "ADDRESS": record.address || "",
+      "WARD N0": record.wardNo || "",
+      "HOUSE N0": record.houseNo || "",
+      "BILL NO": record.billNo || "",
+      "BILL DATE": record.billDate || "",
+      "SAMPATTI CODE": record.sampattiCode || "",
+      "BANK NAME": record.bankName || "",
+      "ACCOUNNT NUMBER": record.accountNumber || "",
+      "IFSC CODE": record.ifscCode || "",
+      "THOUGHT": record.thought || "",
+      "ADDRES CORECT": record.addressCorrect || "",
+      "Created At": createdAt,
+      "Updated At": updatedAt,
     };
+  }
+
+  /* ---- Client-side Hindi derivation (works without any backend deploy) ---- */
+  const HI_CACHE = new Map();
+
+  function hasDevanagari(text) {
+    return /[\u0900-\u097F]/.test(String(text || ""));
+  }
+
+  // "ram kumar sharma" -> "Ram Kumar Sharma"
+  function properCase(text) {
+    const src = String(text || "").trim();
+    if (!src || hasDevanagari(src)) return src;
+    return src.toLowerCase().replace(/(^|[\s\-./])([a-z])/g, (m, sep, ch) => sep + ch.toUpperCase());
+  }
+
+  // JSONP helper: Google Input Tools sends no CORS header, but it does support
+  // a `cb=` callback, so we can load it as a <script> and bypass CORS entirely.
+  function jsonp(url, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      const cbName = "__rv_cb_" + Math.random().toString(36).slice(2);
+      const script = document.createElement("script");
+      let settled = false;
+      const cleanup = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { delete window[cbName]; } catch (e) { window[cbName] = undefined; }
+        if (script.parentNode) script.parentNode.removeChild(script);
+      };
+      const timer = setTimeout(() => { cleanup(); reject(new Error("timeout")); }, timeoutMs || 8000);
+      window[cbName] = (data) => { cleanup(); resolve(data); };
+      script.onerror = () => { cleanup(); reject(new Error("network")); };
+      script.src = url + (url.includes("?") ? "&" : "?") + "cb=" + cbName;
+      document.head.appendChild(script);
+    });
+  }
+
+  async function transliterateToHindi(text) {
+    const src = String(text || "").trim();
+    if (!src) return "";
+    if (hasDevanagari(src)) return src;
+    const key = src.toLowerCase();
+    if (HI_CACHE.has(key)) return HI_CACHE.get(key);
+    const url =
+      "https://inputtools.google.com/request?text=" + encodeURIComponent(src) +
+      "&itc=hi-t-i0-und&num=1&cp=0&cs=1&ie=utf-8&oe=utf-8&app=demopage";
+    try {
+      const data = await jsonp(url, 8000);
+      const out =
+        data && data[0] === "SUCCESS" && data[1] && data[1][0] && data[1][0][1] && data[1][0][1][0]
+          ? data[1][0][1][0]
+          : "";
+      if (out) HI_CACHE.set(key, out);
+      return out;
+    } catch (e) {
+      return "";
+    }
+  }
+
+  // Builds the six derived columns from NAME / F/H NAME / RELETION.
+  async function computeDerivedFields(name, fatherHusbandName, relation) {
+    const n = String(name || "").trim();
+    const f = String(fatherHusbandName || "").trim();
+    const rel = String(relation || "").trim();
+    const out = {};
+    const [hiName, hiFh] = await Promise.all([
+      n ? transliterateToHindi(n) : Promise.resolve(""),
+      f ? transliterateToHindi(f) : Promise.resolve(""),
+    ]);
+    const nameProper = n ? properCase(n) : "";
+    const fhProper = f ? properCase(f) : "";
+    if (hiName) out.nameHindi = hiName;
+    if (nameProper) out.nameProper = nameProper;
+    if (hiName || nameProper) out.ayaName = [hiName, nameProper].filter(Boolean).join(" / ");
+    if (hiFh) out.nameHindi2 = hiFh;
+    if (fhProper) out.fatherHusbandNameProper = fhProper;
+    const full = [nameProper, rel, fhProper].filter(Boolean).join(" ");
+    if (full) out.fullNameProper = full;
+    return out;
   }
 
   function extractRecordList(decoded) {
@@ -564,7 +737,7 @@
       for (const key of ["records", "data", "rows", "items", "values"]) {
         if (Array.isArray(decoded[key])) return decoded[key];
       }
-      if ("aadhaarNumber" in decoded || "id" in decoded || "Aadhaar Number" in decoded) return [decoded];
+      if ("aadhaarNumber" in decoded || "id" in decoded || "AADHAR NUMBER" in decoded || "Aadhaar Number" in decoded) return [decoded];
     }
     throw new Error("The server response did not contain a records list.");
   }
@@ -639,7 +812,7 @@
 
   function recordRowHtml(record, index, withMenu) {
     const relation = String(record.relation || "").trim();
-    const guardian = String(record.guardianName || "").trim();
+    const guardian = String(record.fatherHusbandName || record.guardianName || "").trim();
     const guardianText = [relation, guardian].filter(Boolean).join(" \u00b7 ") || "\u2014";
     const statusLabel = (SYNC[record.syncStatus] || SYNC.synced).label;
     const delay = index < 15 ? ` style="animation-delay:${index * 45}ms"` : ` style="animation:none"`;
@@ -679,7 +852,7 @@
     const q = S.query.trim().toLowerCase();
     if (!q) return S.records;
     return S.records.filter((r) =>
-      [r.name, r.guardianName, r.relation, r.aadhaarNumber, r.accountNumber, r.applicationNo, r.bankName, r.mobileNumberCorrect, r.ifscCode]
+      [r.srNo, r.name, r.nameHindi, r.nameHindi2, r.nameProper, r.ayaName, r.fatherHusbandName, r.fatherHusbandNameProper, r.fullNameProper, r.relation, r.motherName, r.aadhaarNumber, r.accountNumber, r.applicationNo, r.bankName, r.mobileNumberCorrect, r.ifscCode, r.wardNo, r.houseNo, r.billNo, r.billDate, r.sampattiCode]
         .some((v) => String(v || "").toLowerCase().includes(q))
     );
   }
@@ -1607,27 +1780,37 @@
     }
     const isEdit = !!existing;
     const g = (v) => esc(v == null ? "" : v);
+    const autoSrNo = existing ? String(existing.srNo || "") : nextSrNo();
 
     const header = `
       <h2>${isEdit ? "Edit record" : "Add record"}</h2>
       <button class="icon-btn" data-close type="button"><span class="material-symbols-outlined">close</span></button>`;
 
-    const currentGender = existing && GENDERS.some((x) => x.value === existing.gender) ? existing.gender : "";
+    const currentValue = (key) => (existing ? String(existing[key] || "") : "");
 
-    const REQUIRED_KEYS = ["name", "guardianName", "relation", "gender", "aadhaarNumber", "address", "bankName", "accountNumber", "ifscCode"];
+    const REQUIRED_KEYS = ["name", "fatherHusbandName", "relation", "gender", "aadhaarNumber", "address", "bankName", "accountNumber", "ifscCode"];
 
     const fieldHtml = (f) => {
       const req = REQUIRED_KEYS.includes(f.key) ? " *" : "";
-      const ro = isEdit && f.key === "aadhaarNumber" ? "readonly" : "";
-      const val = g(existing ? existing[f.key] : "");
+      const ro = f.autoFill || (isEdit && f.key === "aadhaarNumber") ? "readonly" : "";
+      const val = g(f.key === "srNo" ? autoSrNo : (existing ? existing[f.key] : ""));
       let control;
       if (f.type === "select") {
-        const opts =
-          `<option value="" disabled ${currentGender === "" ? "selected" : ""}>Select</option>` +
-          GENDERS.map(
-            (x) => `<option value="${x.value}" ${currentGender === x.value ? "selected" : ""}>${x.label}</option>`
-          ).join("");
+        const optsList = f.options || (f.key === "gender" ? GENDERS : []);
+        const cur = currentValue(f.key);
+        const known = optsList.some((x) => x.value === cur);
+        const isOther = !!f.custom && !!cur && !known;
+        let opts = `<option value="" disabled ${cur === "" ? "selected" : ""}>Select</option>`;
+        opts += optsList
+          .map((x) => `<option value="${esc(x.value)}" ${cur === x.value ? "selected" : ""}>${esc(x.label)}</option>`)
+          .join("");
+        if (f.custom) opts += `<option value="__other__" ${isOther ? "selected" : ""}>Other\u2026</option>`;
         control = `<div class="control"><span class="material-symbols-outlined">${f.icon}</span><select id="f_${f.key}">${opts}</select></div>`;
+        if (f.custom) {
+          control += `<div class="control" id="f_${f.key}_otherWrap" style="${isOther ? "" : "display:none"}">
+            <span class="material-symbols-outlined">${f.icon}</span>
+            <input id="f_${f.key}_other" placeholder="Type here" value="${isOther ? esc(cur) : ""}"></div>`;
+        }
       } else if (f.type === "textarea") {
         control = `<div class="control" style="align-items:flex-start"><span class="material-symbols-outlined" style="margin-top:14px">${f.icon}</span>
           <textarea id="f_${f.key}" placeholder="${esc(f.placeholder || "")}">${val}</textarea></div>`;
@@ -1643,8 +1826,8 @@
           <input id="f_${f.key}" placeholder="${esc(f.placeholder || "")}" value="${val}" ${attrs}></div>`;
       }
       return `
-      <div class="field" data-field="${f.key}">
-        <label>${esc(f.label)}${req}</label>
+      <div class="field${f.autoFill ? " is-auto" : ""}" data-field="${f.key}">
+        <label>${esc(f.label)}${req}${f.autoFill ? `<span class="auto-chip">auto</span>` : ""}</label>
         ${control}
         <div class="error"></div>
       </div>`;
@@ -1700,16 +1883,59 @@
       if (err) err.textContent = msg || "";
     };
 
+    // Reads a field's value, resolving the "Other…" custom input on selects.
+    const readValue = (f) => {
+      const input = el("f_" + f.key);
+      if (f.type === "select" && f.custom && input && input.value === "__other__") {
+        const other = el("f_" + f.key + "_other");
+        return other ? other.value.trim() : "";
+      }
+      return input ? input.value : "";
+    };
+
     const validate = () => {
-      const checks = FIELDS.map((f) => [f.key, f.validator ? f.validator(el("f_" + f.key).value) : null]);
-      checks.forEach(([n, m]) => setFieldError(n, m));
-      return !checks.some(([, m]) => m);
+      const checks = FIELDS.map((f) => [f, f.validator ? f.validator(readValue(f)) : null]);
+      checks.forEach(([f, m]) => setFieldError(f.key, m));
+      return checks.filter(([, m]) => m).map(([f, m]) => ({ key: f.key, label: f.label, msg: m }));
+    };
+
+    // Scroll to + focus the field with an error so the user can see it directly.
+    const focusField = (key) => {
+      const field = host.querySelector(`[data-field="${key}"]`);
+      if (!field) return;
+      try { field.scrollIntoView({ behavior: "smooth", block: "center" }); } catch (e) { }
+      const input = field.querySelector("input, select, textarea");
+      if (input) { try { input.focus({ preventScroll: true }); } catch (e) { } }
+    };
+
+    // Show WHICH field(s) failed and WHY (instead of a generic message).
+    const reportErrors = (fails) => {
+      if (!fails.length) return;
+      focusField(fails[0].key);
+      if (fails.length === 1) {
+        snackbar(`${fails[0].label}: ${fails[0].msg}`, 4000);
+        return;
+      }
+      const lines = fails.map((f) => `\u2022 ${f.label}: ${f.msg}`).join("\n");
+      snackbar(`${fails.length} fields me error:\n${lines}`, Math.min(9000, 2500 + fails.length * 1300));
     };
 
     FIELDS.forEach((f) => {
       const input = el("f_" + f.key);
       if (!input) return;
-      const live = () => setFieldError(f.key, f.validator ? f.validator(input.value) : null);
+      const live = () => setFieldError(f.key, f.validator ? f.validator(readValue(f)) : null);
+      if (f.custom && f.type === "select") {
+        const otherWrap = el("f_" + f.key + "_otherWrap");
+        const otherInput = el("f_" + f.key + "_other");
+        const syncOther = () => {
+          const on = input.value === "__other__";
+          if (otherWrap) otherWrap.style.display = on ? "" : "none";
+          if (on && otherInput) otherInput.focus();
+          live();
+        };
+        input.addEventListener("change", syncOther);
+        if (otherInput) otherInput.addEventListener("input", live);
+      }
       if (f.numeric) {
         input.addEventListener("input", () => {
           const cleaned = input.value.replace(/[^0-9]/g, "").slice(0, f.numeric);
@@ -1731,9 +1957,56 @@
       input.addEventListener("blur", live);
     });
 
+    // ---- Auto-fill the read-only derived fields from NAME / F/H NAME / RELETION ----
+    const derivedIds = ["f_nameHindi", "f_nameProper", "f_ayaName", "f_nameHindi2", "f_fatherHusbandNameProper", "f_fullNameProper"];
+    let deriveTimer = null;
+    let deriveSeq = 0;
+    const refreshDerived = async () => {
+      const name = el("f_name").value.trim();
+      const fatherHusbandName = el("f_fatherHusbandName").value.trim();
+      const relation = readValue({ key: "relation", type: "select", custom: true });
+      const setVal = (id, v) => { el(id).value = v == null ? "" : v; };
+      if (!name && !fatherHusbandName) {
+        derivedIds.forEach((id) => setVal(id, ""));
+        return;
+      }
+      const seq = ++deriveSeq;
+      let d = {};
+      try {
+        d = await computeDerivedFields(name, fatherHusbandName, relation);
+      } catch (e) { d = {}; }
+      if (seq !== deriveSeq) return; // a newer edit happened; drop this stale result
+      setVal("f_nameProper", d.nameProper || "");
+      setVal("f_fatherHusbandNameProper", d.fatherHusbandNameProper || "");
+      const full = d.fullNameProper || "";
+      if (full) setVal("f_fullNameProper", full);
+      // Hindi values need internet; only touch them when we actually got a result
+      // (so a network hiccup never wipes what is already there).
+      if (d.nameHindi) setVal("f_nameHindi", d.nameHindi);
+      else if (!name) setVal("f_nameHindi", "");
+      if (d.nameHindi2) setVal("f_nameHindi2", d.nameHindi2);
+      else if (!fatherHusbandName) setVal("f_nameHindi2", "");
+      if (d.nameHindi && d.nameProper) setVal("f_ayaName", d.ayaName);
+      else if (!name) setVal("f_ayaName", "");
+    };
+    const scheduleDerived = () => {
+      clearTimeout(deriveTimer);
+      deriveTimer = setTimeout(refreshDerived, 400);
+    };
+    ["f_name", "f_fatherHusbandName"].forEach((id) => {
+      const input = el(id);
+      if (input) input.addEventListener("input", scheduleDerived);
+    });
+    ["f_relation", "f_relation_other"].forEach((id) => {
+      const input = el(id);
+      if (input) input.addEventListener("input", scheduleDerived);
+      if (input) input.addEventListener("change", scheduleDerived);
+    });
+
     el("saveBtn").addEventListener("click", async () => {
-      if (!validate()) {
-        snackbar("Please fix the highlighted fields.", 3500);
+      const fails = validate();
+      if (fails.length) {
+        reportErrors(fails);
         return;
       }
       const aadhaarNumber = normAadhaar(el("f_aadhaarNumber").value.trim());
@@ -1742,27 +2015,60 @@
         return;
       }
       const now = new Date();
+      const btn = el("saveBtn");
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span>Saving\u2026`;
+
+      // Auto-fill the six derived columns from NAME / F/H NAME / RELETION. This runs
+      // in the app itself so it works even if the backend was not redeployed.
+      const relationValue = readValue({ key: "relation", type: "select", custom: true });
+      let derived = {};
+      try {
+        derived = await computeDerivedFields(
+          el("f_name").value.trim(),
+          el("f_fatherHusbandName").value.trim(),
+          relationValue
+        );
+      } catch (e) { derived = {}; }
+      const reflect = (id, v) => { if (v != null && v !== "") el(id).value = v; };
+      reflect("f_nameHindi", derived.nameHindi);
+      reflect("f_nameProper", derived.nameProper);
+      reflect("f_ayaName", derived.ayaName);
+      reflect("f_nameHindi2", derived.nameHindi2);
+      reflect("f_fatherHusbandNameProper", derived.fatherHusbandNameProper);
+      reflect("f_fullNameProper", derived.fullNameProper);
+
       const record = {
+        srNo: el("f_srNo").value.trim(),
         applicationNo: el("f_applicationNo").value.trim(),
-        name: el("f_name").value.trim(),
-        guardianName: el("f_guardianName").value.trim(),
-        relation: el("f_relation").value.trim(),
-        gender: el("f_gender").value,
         aadhaarNumber,
+        mobileNumberCorrect: normMobile(el("f_mobileNumberCorrect").value.trim()),
+        name: el("f_name").value.trim(),
+        nameHindi: el("f_nameHindi").value.trim(),
+        nameProper: el("f_nameProper").value.trim(),
+        ayaName: el("f_ayaName").value.trim(),
+        fatherHusbandName: el("f_fatherHusbandName").value.trim(),
+        nameHindi2: el("f_nameHindi2").value.trim(),
+        fatherHusbandNameProper: el("f_fatherHusbandNameProper").value.trim(),
+        relation: relationValue,
+        fullNameProper: el("f_fullNameProper").value.trim(),
+        gender: el("f_gender").value,
+        motherName: el("f_motherName").value.trim(),
         address: el("f_address").value.trim(),
+        wardNo: el("f_wardNo").value.trim(),
+        houseNo: el("f_houseNo").value.trim(),
+        billNo: el("f_billNo").value.trim(),
+        billDate: el("f_billDate").value.trim(),
+        sampattiCode: el("f_sampattiCode").value.trim(),
         bankName: el("f_bankName").value.trim(),
         accountNumber: el("f_accountNumber").value.trim(),
         ifscCode: el("f_ifscCode").value.trim().toUpperCase(),
+        thought: el("f_thought").value.trim(),
         addressCorrect: el("f_addressCorrect").value.trim(),
-        mobileNumberCorrect: normMobile(el("f_mobileNumberCorrect").value.trim()),
-        remarks: el("f_remarks").value.trim(),
         createdAt: (existing && existing.createdAt) || now,
         updatedAt: now,
       };
 
-      const btn = el("saveBtn");
-      btn.disabled = true;
-      btn.innerHTML = `<span class="spinner" style="width:18px;height:18px;border-width:2px"></span>Saving\u2026`;
       try {
         const result = isEdit ? await Api.updateRecord(record) : await Api.addRecord(record);
         if (!result.confirmed) throw new Error(result.message || "Server did not confirm the save.");
@@ -1789,7 +2095,7 @@
       <button class="icon-btn" data-close type="button"><span class="material-symbols-outlined">arrow_back</span></button>
       <h2>Record details</h2>`;
 
-    const guardianLine = [record.relation, record.guardianName]
+    const guardianLine = [record.relation, record.fatherHusbandName || record.guardianName]
       .map((s) => String(s || "").trim())
       .filter(Boolean)
       .join(" - ");
@@ -1826,15 +2132,29 @@
       </div>
 
       ${section("Identity", [
+      tile("badge", "S.R", record.srNo, true),
       tile("confirmation_number", "Application No", record.applicationNo, true),
       tile("person", "Name", record.name, true),
-      tile("man", "Name / Father's or Husband's", guardianLine, false),
+      tile("person", "Name (Hindi)", record.nameHindi, true),
+      tile("person", "Name Proper", record.nameProper, true),
+      tile("person", "Aya Name", record.ayaName, true),
+      tile("man", "F/H Name", record.fatherHusbandName, true),
+      tile("person", "Name (Hindi) 2", record.nameHindi2, true),
+      tile("man", "F/H Name Proper", record.fatherHusbandNameProper, true),
+      tile("diversity_3", "Relation", record.relation, true),
+      tile("person", "Full Name Proper", record.fullNameProper, true),
       tile("wc", "Male / Female", genderLabel(record.gender), false),
+      tile("woman", "Mother Name", record.motherName, true),
       tile("badge", "Aadhaar number", record.aadhaarNumber, true),
     ])}
 
       ${section("Address", [
       tile("location_on", "Address", record.address, true),
+      tile("location_on", "Ward No", record.wardNo, true),
+      tile("home", "House No", record.houseNo, true),
+      tile("receipt", "Bill No", record.billNo, true),
+      tile("calendar_today", "Bill Date", record.billDate, true),
+      tile("label", "Sampatti Code", record.sampattiCode, true),
       tile("home_pin", "Address Correct", record.addressCorrect, true),
     ])}
 
@@ -1848,7 +2168,7 @@
       tile("call", "Mobile Number Correct", record.mobileNumberCorrect, true),
     ])}
 
-      ${record.remarks ? `<div class="section-label">Remarks</div><div class="card" style="padding:16px">${esc(record.remarks)}</div>` : ""}
+      ${record.thought ? `<div class="section-label">Thought</div><div class="card" style="padding:16px">${esc(record.thought)}</div>` : ""}
 
       ${section("Timestamps", [
       tile("add_circle", "Created", fmtDateTime(record.createdAt), false),

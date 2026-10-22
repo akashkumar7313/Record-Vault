@@ -60,17 +60,34 @@ Pushed on top:
 
 ## Record fields
 
-| Field | Notes |
-|-------|-------|
-| `applicationNo` | Optional application number |
-| `name` | Full name |
-| `gender` | Male / Female |
-| `aadhaarNumber` | 12 digits — primary key + sync idempotency key |
-| `guardianName`, `relation` | Father's or husband's name + relation |
-| `address`, `addressCorrect` | Current and corrected address |
-| `bankName`, `accountNumber`, `ifscCode` | Bank details |
-| `mobileNumberCorrect` | 10-digit mobile number |
-| `remarks` | Free-form notes |
+| Field (key) | Sheet header | Notes |
+|-------------|--------------|-------|
+| `srNo` | S.R | Serial number |
+| `applicationNo` | Application_No | Optional application number |
+| `aadhaarNumber` | AADHAR NUMBER | 12 digits — primary key + sync idempotency key |
+| `mobileNumberCorrect` | MOBILE NUMBER CORECT | 10-digit mobile number |
+| `name` | NAME | Full name |
+| `nameHindi` | NAME HINDI | Auto-filled Hindi of NAME (read-only) |
+| `nameProper` | NAME PROPER | Auto-filled proper case of NAME (read-only) |
+| `ayaName` | AYA NAME | Auto-filled: `NAME HINDI / NAME PROPER` (read-only) |
+| `fatherHusbandName` | F/H NAME | Father's or husband's name |
+| `nameHindi2` | NAME HINDI | Auto-filled Hindi of F/H NAME (duplicate header, read-only) |
+| `fatherHusbandNameProper` | F/H NAME PROPER | Auto-filled proper case of F/H NAME (read-only) |
+| `relation` | RELETION | Relation (W/o, S/o, D/o or custom) |
+| `fullNameProper` | FULE NAME PROPER | Auto-filled: `NAME PROPER RELETION F/H NAME PROPER` (read-only) |
+| `gender` | MALE / FEMALE | Male / Female |
+| `motherName` | MOTHER NAME | Mother's name |
+| `address` | ADDRESS | Current address |
+| `wardNo` | WARD N0 | Ward number |
+| `houseNo` | HOUSE N0 | House number |
+| `billNo` | BILL NO | Bill number |
+| `billDate` | BILL DATE | Bill date |
+| `sampattiCode` | SAMPATTI CODE | Sampatti code |
+| `bankName` | BANK NAME | Bank name |
+| `accountNumber` | ACCOUNNT NUMBER | Bank account number |
+| `ifscCode` | IFSC CODE | Bank IFSC code |
+| `thought` | THOUGHT | Free-form notes |
+| `addressCorrect` | ADDRES CORECT | Corrected address |
 
 Sync metadata: `pending` / `synced` / `failed` / `conflict`, created/updated
 timestamps, soft-delete tombstone flag.
